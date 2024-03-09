@@ -1,0 +1,8 @@
+SumMe
+*.pkl
+__pycache__
+*.pt
+video
+*.h5
+*.tsv
+*.mat
