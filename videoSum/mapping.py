@@ -46,6 +46,7 @@ def decode_titles(encoded_titles, hdf5_file):
 # Extract data from .mat file
 def get_video_data_from_mat(file_path):
     video_data_mat = []
+    breakpoint()
     with h5py.File(file_path, 'r') as f:
         encoded_videos = f['tvsum50']['video'][:]
         encoded_frame_counts = f['tvsum50']['nframes'][:]
