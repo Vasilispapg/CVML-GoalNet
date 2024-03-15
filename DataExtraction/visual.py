@@ -2,20 +2,15 @@ import cv2
 import numpy as np
 import cv2
 from keras.applications.vgg16 import VGG16, preprocess_input
+from keras.layers import GlobalAveragePooling2D
 from tensorflow.keras.preprocessing.image import img_to_array
-from sklearn.preprocessing import StandardScaler, LabelEncoder
 import numpy as np
-from keras.models import Sequential
+from keras.models import Sequential, Model
 import cv2
-from sklearn.impute import SimpleImputer
-
-# Load pre-trained model tokenizer (vocabulary)
-import sys
-sys.path.append('AutoEncoder')
-from autoEncoder import reduce_features_with_autoencoder
 
 
-def extract_color_features(frame, bins=512):
+
+def extract_color_features(frame, bins=64):
     """
     Extract color histogram features from a frame.
 
@@ -67,6 +62,13 @@ base_model.load_weights(weights_path)
 model = Sequential()
 model.add(base_model)
 
+# reduce 7x7x512 to 512 using GlobalAveragePooling2D
+x = base_model.output
+x = GlobalAveragePooling2D()(x)
+
+# Create a new model
+model = Model(inputs=base_model.input, outputs=x)
+
 def extract_visual_features(frames):
     features = []
     for frame in frames:
@@ -75,7 +77,6 @@ def extract_visual_features(frames):
             img = img_to_array(img)              # Convert to array
             img = np.expand_dims(img, axis=0)    # Add batch dimension
             img = preprocess_input(img)          # Preprocess for VGG16
-            
             feature = model.predict(img,use_multiprocessing=True,workers=4)
             features.append(feature.flatten())
 
@@ -94,27 +95,17 @@ def integrate_features(frames,vgg_features=None):
     integrated_features = []
     if(vgg_features is None):
         vgg_features = extract_visual_features(frames) 
-        
+    
+    integrated_features.append([extract_color_features(frames[0]),vgg_features[0]])
+    
     for i in range(1, len(frames)):
         color_features = extract_color_features(frames[i])
         # magnitude, angle = compute_optical_flow(frames[i-1], frames[i])
 
-        # Concatenate features
-        # combined_features = np.concatenate([color_features, magnitude, angle, vgg_features[i]])
-        combined_features = np.concatenate([color_features, vgg_features[i]])
 
-        integrated_features.append(combined_features)
-    # Reduce features using autoencoder
-    
-    imputer = SimpleImputer(strategy='mean')  # Can also use 'median' or 'most_frequent'
-    integrated_features = imputer.fit_transform(integrated_features)
-    
-    integrated_features = StandardScaler().fit_transform(integrated_features)
-    
-    # print("integrated_features shape: ",integrated_features.shape)
-    # print("integrated_features[0]: ",integrated_features[0].shape)
-   
-    reduced_features = reduce_features_with_autoencoder(np.array(integrated_features))
-    
-    return reduced_features
+        # combined_features = np.concatenate([color_features, vgg_features[i]])
+        # integrated_features.append([color_features, magnitude, angle, vgg_features[i]])
+        
+        integrated_features.append([color_features,vgg_features[i]])
+    return integrated_features
 
