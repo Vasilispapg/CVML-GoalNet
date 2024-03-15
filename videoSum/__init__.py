@@ -6,6 +6,7 @@ sys.path.append('Evaluation')
 sys.path.append('yolo')
 sys.path.append('videoSum')
 sys.path.append('knapsack')
+sys.path.append('model')
 import os
 import numpy as np
 
@@ -19,6 +20,7 @@ from deletePkl import deletePKLfiles
 from videoCreator import create_video_from_frames
 from data import DataExtraction
 from importances import calculate_importance
+from model import callNN
 
 annotation_path='datasets/ydata-tvsum50-v1_1/data/ydata-tvsum50-anno.tsv'
 info_path='datasets/ydata-tvsum50-v1_1/data/ydata-tvsum50-info.tsv'
@@ -42,11 +44,12 @@ def videoSumm(annotation_path=None, info_path=None, video_path=None, summary_vid
         original_frames=extract_frames(video_path+video, frame_rate=1)
              
         # Extract Data
-        objects,title_features = DataExtraction(video_path+video, annotation_path, info_path,getDataFlag=getDataFlag)
-        
-        # Calculate importance scores for this cluster
-        importance = calculate_importance(title_features, objects)
-        
+        encoded_objects,visual_features,audio_features = DataExtraction(video_path+video, annotation_path, info_path,getDataFlag=getDataFlag)
+       
+        callNN(visual_features, audio_features, encoded_objects)
+        # # Calculate importance scores for this cluster
+        # importance = calculate_importance(title_features, objects)
+
         # Maping to 1/1 rate
         importance=map_scores_to_original_frames(importance, 15)
 
