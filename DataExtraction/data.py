@@ -17,9 +17,6 @@ from importances import manhattan_distance
 import spacy_sentence_bert
 tokenizer = spacy_sentence_bert.load_model('en_stsb_roberta_large')
 
-
-
-
 import sys
 sys.path.append('yolo')
 sys.path.append('DataExtraction')
@@ -30,11 +27,6 @@ sys.path.append('knapsack')
 import os
 
 from frames import extract_frames
-from mapping import map_scores_to_original_frames
-from clipImportance import getClipImportances
-from clipImportance import getSelectedIndicesFromClips
-from knapsack import knapsack_for_video_summary
-from fscoreEval import evaluation_method
 
 annotation_path='datasets/ydata-tvsum50-v1_1/data/ydata-tvsum50-anno.tsv'
 info_path='datasets/ydata-tvsum50-v1_1/data/ydata-tvsum50-info.tsv'
@@ -56,8 +48,9 @@ def extractData(video_path, anno_file, info_file,flag_to_extract):
 
     # # Extract visual features
     if(flag_to_extract[1]):
+        visual_features=integrate_features(frames)
         # visual_features = extract_visual_features(frames) 
-        return_data.append(['visual',"visual_features"])
+        return_data.append(['visual',visual_features])
     else:
         return_data.append(None)
 
@@ -116,7 +109,6 @@ def score_frames_with_title_object(integrated_features, title_vector, object_vec
     return frame_scores
 
 
-
 def DataExtraction(video_path, anno_file, info_file,getDataFlag=False):
     """
     Integrate visual, audio, and annotation features from a video,
@@ -135,8 +127,10 @@ def DataExtraction(video_path, anno_file, info_file,getDataFlag=False):
     video=video_path.split('/')[-1].split('.')[0]
     
     # GetData
+    # we cant keep them in memory to big for too short videos
+    frames = None
+    
     objects=getData('objects',video)
-    frames=getData('frames',video)
     visual_features=getData('visual',video)
     audio_features=getData('audio',video)
     title_features=getData('title',video)
@@ -178,82 +172,5 @@ def DataExtraction(video_path, anno_file, info_file,getDataFlag=False):
         encoded_objects,objects = detectObjects(frames,objects,encoded_objects=encoded_objects,tokenizer=tokenizer)
         
     saveData('encoded_objects',encoded_objects,video)
-   
-    # title_features=fusion(audio_features,title_features)
-    # encoded_objects=fusion(audio_features,encoded_objects)
-    
-    # padding
-    # score=score_frames_with_title_object(audio_features, title_features, encoded_objects)
-    # print("SCORE:",len(score))
-    # print(score)
-    
-    ################################
-    # original_frames=extract_frames(video_path, frame_rate=1)
-    # # Maping to 1/1 rate
-    # importance=map_scores_to_original_frames(score, 15)
-    # # pad importance to original
-    # if(len(importance)>len(original_frames)):
-    #     importance=importance[:len(original_frames)]
-    # else:
-    #     importance=importance+[importance[-1]]*(len(original_frames)-len(importance))
-        
-    # print(len(importance),len(original_frames))
-    # # get the best cluster
-    # clip_info = getClipImportances(importance,video)
-    # # Extracting values (importance scores) and weights (number of frames)
-    # values = [score for score, frames in clip_info.values()]
-    # weights = [frames for score, frames in clip_info.values()]
-    
-    # print("Values:",values)
-    # print("Weights:",weights)
 
-    # # Calculate the total number of frames in the video
-    # total_frames = len(original_frames)
-    # print("Total Frames:",total_frames)
-
-    # # Calculate the capacity as 15% of the total number of frames
-    # capacity = int(0.16 * total_frames)
-    # print("Capacity:",capacity)
-
-    # # Now apply the knapsack algorithm
-    # selected_clips = knapsack_for_video_summary(values, weights, capacity)
-    # print("Summary Indices:",selected_clips)
-    
-    # selected_indices=getSelectedIndicesFromClips(selected_clips,video)
-    # print('Sum Len Frame:',len(selected_indices))
-        
-    # # Evaluate
-    # evaluation_method(ground_truth_path, selected_indices, video.split('.')[0])
-    # print("TELOS")
-    ################################
-    
-    return [encoded_objects,title_features]
-
-
-import numpy as np
-def fusion(audio, vector):
-    print("Initial audio shape check:", np.asarray(audio).shape)
-    print("Initial vector shape check:", np.asarray(vector).shape)
-
-    b = []
-    for i, a in enumerate(audio):
-        a = np.asarray(a)
-        vector = np.asarray(vector)
-
-        # # Check and print their dimensions
-        # print(f"Array {i} shape: {a.shape}, Vector shape: {vector.shape}")
-
-        # # Ensure both are 1D arrays
-        # if a.ndim != 1 or vector.ndim != 1:
-        #     print(f"Error: Non 1D array detected. Array {i} dim: {a.ndim}, Vector dim: {vector.ndim}")
-        #     continue
-
-        # Trimming to the minimum length
-        min_length = min(len(a), len(vector))
-        trimmed_a = a[:min_length]
-        trimmed_vector = vector[:min_length]
-
-        # Perform element-wise multiplication
-        b.append(trimmed_a * trimmed_vector)
-
-    return b
+    return [encoded_objects,visual_features,audio_features]
