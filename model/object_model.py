@@ -1,11 +1,12 @@
 import torch
 import torch.nn as nn
-import torch.optim as optim
+import sys
+sys.path.append('DataExtraction')
 
-# Assuming YOLOv5 and coco.names loading functions are defined elsewhere
+from objects import loadYOLOv5
 
 class ObjectEmbeddingModel(nn.Module):
-    def __init__(self, num_embeddings, embedding_dim, num_classes):
+    def __init__(self, num_embeddings, embedding_dim, num_classes, num_objects_per_frame=10):
         super(ObjectEmbeddingModel, self).__init__()
         self.embedding = nn.Embedding(num_embeddings, embedding_dim)
         # An example linear layer that takes the flattened embeddings as input
@@ -20,37 +21,41 @@ class ObjectEmbeddingModel(nn.Module):
 
 def encode_objects(objects, class_to_idx):
     # Convert object names to indices
-    encoded_objects = [class_to_idx[obj] for obj in objects if obj in class_to_idx]
+    encoded_objects = [class_to_idx.get(obj, -1) for obj in objects]
     return encoded_objects
 
-# Example usage
+def convert_list_to_dict(class_list):
+    return {classname: index for index, classname in enumerate(class_list)}
 
-# Load YOLOv5 and class indices
-# TODO: AYRIO
-yolo_model, class_to_idx = loadYOLOv5()
-num_classes = len(class_to_idx)  # Number of unique objects
-embedding_dim = 16  # Dimension of the embedding vector
-num_objects_per_frame = 10  # Maximum number of objects detected in a frame
 
-# Initialize the model
-model = ObjectEmbeddingModel(num_embeddings=num_classes, embedding_dim=embedding_dim, num_classes=5)  # Adjust num_classes based on your task
+def process_detected_objects(detected_objects_batch):
+    # Load YOLOv5 and class indices
+    _, class_to_idx = loadYOLOv5()
 
-# Example detected objects from YOLOv5 for a batch of frames
-detected_objects_batch = [['person', 'car'], ['dog'], ['person', 'bicycle', 'dog'], []]  # Example
+    num_classes = len(class_to_idx)  # Number of unique objects
+    embedding_dim = 16  # Dimension of the embedding vector
+    num_objects_per_frame = 10  # Maximum number of objects detected in a frame
 
-# Encode detected objects
-encoded_batches = []
-for objects in detected_objects_batch:
-    encoded_objects = encode_objects(objects, class_to_idx)
-    # Pad or truncate the list of encoded objects to have a fixed size
-    encoded_objects = encoded_objects[:num_objects_per_frame]  # Truncate if necessary
-    encoded_objects += [0] * (num_objects_per_frame - len(encoded_objects))  # Pad with zeros (assuming 0 is not a valid object index)
-    encoded_batches.append(encoded_objects)
+    # Init the model
+    model = ObjectEmbeddingModel(num_embeddings=num_classes, embedding_dim=embedding_dim, num_classes=num_classes,num_objects_per_frame=num_objects_per_frame)  # Adjust num_classes based on your task
 
-encoded_batches_tensor = torch.LongTensor(encoded_batches)  # Convert to tensor
+    # Convert it to a dictionary
+    class_to_idx_dict = convert_list_to_dict(class_to_idx) 
 
-# Forward pass (just an example, in reality, you would have labels and a proper training loop)
-outputs = model(encoded_batches_tensor)
-print(outputs)
+    # Encode detected objects
+    encoded_batches = []
+    for objects in detected_objects_batch:
+        encoded_objects = encode_objects(objects, class_to_idx_dict)
+        # Pad or truncate the list of encoded objects to have a fixed size
+        encoded_objects = encoded_objects[:num_objects_per_frame]  # Truncate if necessary
+        encoded_objects += [0] * (num_objects_per_frame - len(encoded_objects))  # Pad with zeros if necessary
+        encoded_batches.append(encoded_objects)
 
-# From here, you would define your loss function, optimizer, and proceed with training as usual.
+    encoded_batches_tensor = torch.LongTensor(encoded_batches)  # Convert to tensor
+
+    # Forward pass
+    outputs = model(encoded_batches_tensor)
+    return outputs
+
+# Example how to use the function 
+# obj=process_detected_objects([['person', 'car', 'truck','cat'], ['person', 'car'], ['person', 'truck'],[],[]])
