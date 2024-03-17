@@ -2,9 +2,11 @@
 import sys
 sys.path.append('yolo')
 sys.path.append('DataExtraction')
-
+sys.path.append('model')
 from objectDetection import detect_objects_in_all_frames
 from save import saveData
+from object_embedding_model import process_detected_objects
+
 
 import torch
 def loadYOLOv5():
@@ -17,32 +19,20 @@ def loadYOLOv5():
     return yolo_model,classes
 
 def detectObjects(frames, objects=None,encoded_objects=None,video=None,tokenizer=None):
+    yolo_model, classes = loadYOLOv5()
     if objects is None:
         print('Detecting objects in frames...')
-        yolo_model, classes = loadYOLOv5()
         
         objects = detect_objects_in_all_frames(frames, yolo_model, classes)
         saveData('objects',objects,video)
 
     # Here, taking the first detected object
-    objects = [frame_objects if frame_objects else ['None'] for frame_objects in objects]
-
-    count=0
-    for obj in objects:
-        for o in obj:
-            count+=1
-            
-    # print(f'Total Encoded Obj: {count}')
-    # print("Objects:",len(objects))
-
-    # One-hot encoding of objects
+    objects = [frame_objects if frame_objects else [] for frame_objects in objects]
+    
     if encoded_objects is None:
-        encoded_objects = []
-        for frame_objects in objects:
-            # Encode each object in the frame
-            encoded_frame_objects = [tokenizer(ob).vector for ob in frame_objects]
-            # Add the list of encoded objects for this frame to the main list
-            encoded_objects.append(encoded_frame_objects)
-        
+        print('Processing detected objects...')
+        encoded_objects = process_detected_objects(objects,classes)
+    
+    print('Detected objects processed.')
     
     return encoded_objects, objects
