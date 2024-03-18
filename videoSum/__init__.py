@@ -6,7 +6,6 @@ sys.path.append('Evaluation')
 sys.path.append('yolo')
 sys.path.append('videoSum')
 sys.path.append('knapsack')
-sys.path.append('model')
 import os
 import numpy as np
 
@@ -19,8 +18,9 @@ from fscoreEval import evaluation_method
 from deletePkl import deletePKLfiles
 from videoCreator import create_video_from_frames
 from data import DataExtraction
-from importances import calculate_importance
 from model import callNN
+from labels import getAnnotations
+
 
 annotation_path='datasets/ydata-tvsum50-v1_1/data/ydata-tvsum50-anno.tsv'
 info_path='datasets/ydata-tvsum50-v1_1/data/ydata-tvsum50-info.tsv'
@@ -46,7 +46,8 @@ def videoSumm(annotation_path=None, info_path=None, video_path=None, summary_vid
         # Extract Data
         encoded_objects,visual_features,audio_features = DataExtraction(video_path+video, annotation_path, info_path,getDataFlag=getDataFlag)
        
-        callNN(visual_features, audio_features, encoded_objects)
+        labels = getAnnotations(annotation_path, video.split('.')[0])
+        callNN(visual_features, audio_features, encoded_objects,labels=labels)
         # # Calculate importance scores for this cluster
         # importance = calculate_importance(title_features, objects)
 
@@ -100,4 +101,4 @@ def videoSumm(annotation_path=None, info_path=None, video_path=None, summary_vid
         
     # return
     
-videoSumm(annotation_path, info_path, video_path, summary_video_path, video_list)
+# videoSumm(annotation_path, info_path, video_path, summary_video_path, video_list)
