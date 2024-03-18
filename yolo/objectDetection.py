@@ -85,7 +85,7 @@ def detect_objects_with_yolo(frame, model, classes):
     # Parse results
     detected_labels = set()
     for _, _, _, _, conf, cls_id in results.xyxy[0].cpu().numpy():
-        if conf > 0.85:  # Confidence threshold
+        if conf > 0.80:  # Confidence threshold
             detected_labels.add(classes[int(cls_id)])
 
     return list(detected_labels)
