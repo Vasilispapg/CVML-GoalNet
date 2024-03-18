@@ -1,9 +1,7 @@
 import torch
-
 import torch.nn as nn
 import torch.optim as optim
 import torch.utils.data as data
-import numpy as np
 
 class NeuralNetwork(nn.Module):
     def __init__(self, input_size, num_classes):
@@ -33,14 +31,14 @@ def train_model(model, train_loader, criterion, optimizer, num_epochs):
             loss.backward()
             optimizer.step()
             
-def prepare_frame_features(colors_features, vgg_features, audio_features, objects_encoded):
+def prepare_frame_features(color_features, vgg_features, audio_features, objects_encoded):
     """
     Prepares a single frame's features for model input.
     """
     # Assuming colors_features, vgg_features, audio_features, and objects_encoded are already in the correct format
     # and just need to be concatenated.
-    breakpoint()
-    frame_features = torch.cat((colors_features, vgg_features, audio_features, objects_encoded), 0).unsqueeze(0)  # Add batch dimension
+    frame_features = torch.cat((color_features, vgg_features, audio_features, objects_encoded), 0).unsqueeze(0)  # Add batch dimension
+
     return frame_features
 
 def evaluate_single_frame(model, frame_features):
@@ -65,14 +63,14 @@ def evaluate_model(model, test_loader):
         test_acc = correct / total
         print('Test accuracy:', test_acc)
 
-def callNN(visual_features, audio_features, objects_encoded):
+def callNN(visual_features, audio_features, objects_encoded,labels):
     
     # Hyperparameters    
     batch_size = 10
     num_epochs = 2
     
     # Create an instance of the neural network
-    model = NeuralNetwork(512+ (3*64) +128 +1024,5)
+    model = NeuralNetwork(input_size=(3*64) + 512 + 128 + 80 , num_classes=5)
     
     # Define the loss function and optimizer
     criterion = nn.CrossEntropyLoss()
@@ -87,9 +85,17 @@ def callNN(visual_features, audio_features, objects_encoded):
     audio_features = torch.tensor(audio_features)
     objects_encoded = torch.tensor(objects_encoded)
     
-    # CONCATAENATE
-    frame_features = prepare_frame_features(colors_features, vgg_features, audio_features, objects_encoded)
+    # CONCATENATE FEATURES
+    frame_features=[]
+    for i in range(len(colors_features)):
+        frame_features.append(prepare_frame_features(colors_features[i], vgg_features[i], audio_features[i], objects_encoded[i]))
+    # output shape (1, 3*64 + 512 + 128 + 80) = (1, 912)
     
+    # concatenate the labels with the frames
+    # we have 20 labels for each frame
+    # TODO: concatenate the labels with the frames
+    
+    breakpoint()
     train_dataset = data.TensorDataset(frame_features, torch.tensor([1]))
     test_dataset = data.TensorDataset(frame_features, torch.tensor([1]))
     breakpoint()
@@ -111,3 +117,4 @@ def callNN(visual_features, audio_features, objects_encoded):
     probabilities, predicted_class = evaluate_single_frame(model, frame_features)
     print(f"Probabilities: {probabilities}")
     print(f"Predicted class: {predicted_class}")
+    
