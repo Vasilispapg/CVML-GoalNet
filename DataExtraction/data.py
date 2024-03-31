@@ -95,7 +95,6 @@ def DataExtraction(video_path, anno_file, info_file,getDataFlag=False):
     # objects=getData('objects',video) # YOLO's prediction
     visual_features=getData('visual',video) # VGG16 prediction. list[list[np.ndarray[np.float32]]]. Shape (461, 2, 192).
     audio_features=getData('audio',video) # MFCC features. list[np.ndarray[np.float32]]. Shape (461, 128).
-    breakpoint()
     # title_features=getData('title',video) # TOkenized (roberta?) features
     # encoded_objects=getData('encoded_objects',video) # ObjectEmbeddingModel features (88 features)
 
@@ -106,7 +105,7 @@ def DataExtraction(video_path, anno_file, info_file,getDataFlag=False):
     if(visual_features is not None):
         flag_to_extract[1]=False
     if(audio_features is not None):
-        flag_to_extract[2]=False
+        flag_to_extract[2]=True
     # if(title_features is not None):
     #     flag_to_extract[3]=False
 
@@ -135,4 +134,4 @@ def DataExtraction(video_path, anno_file, info_file,getDataFlag=False):
         
     # saveData('encoded_objects',encoded_objects,video)
 
-    return [visual_features,audio_features]
+    return audio_features
