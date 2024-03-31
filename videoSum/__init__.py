@@ -22,32 +22,32 @@ from model import callNN
 from labels import getAnnotations
 
 
-annotation_path='datasets/ydata-tvsum50-v1_1/data/ydata-tvsum50-anno.tsv'
-info_path='datasets/ydata-tvsum50-v1_1/data/ydata-tvsum50-info.tsv'
-video_path='datasets/ydata-tvsum50-v1_1/video/'
-summary_video_path='datasets/summary_videos/'
-ground_truth_path='datasets/ydata-tvsum50-v1_1/ground_truth/ydata-tvsum50.mat'
+annotation_path='datasets/ydata-tvsum50-v1_1/data/ydata-tvsum50-anno.tsv' # Path for importantce (ground truth (partial))
+info_path='datasets/ydata-tvsum50-v1_1/data/ydata-tvsum50-info.tsv' # Path for the videos (e.g. links)
+video_path='datasets/ydata-tvsum50-v1_1/video/' # Input videos
+summary_video_path='datasets/summary_videos/' # Output pou vazoume ta video summaries
+ground_truth_path='datasets/ydata-tvsum50-v1_1/ground_truth/ydata-tvsum50.mat' # Katigoria annotation users etc (ground truth partial)
 video_list = [video for video in os.listdir(video_path) if video.endswith('.mp4')]  # List comprehension
 
 
 def videoSumm(annotation_path=None, info_path=None, video_path=None, summary_video_path=None,video_list=None):
+    video_list=['-esJrBWj2d8.mp4']
     for video in video_list: 
-        # video='0tmA_C6XwfM.mp4'
-        
+
         # if(os.path.exists(f'{summary_video_path}{video}')):
         #     continue
-    
+
         print("VIDEO:",video)
-        getDataFlag=False
+        getDataFlag=False # an tha pareis ta dedomena apta extracted i an tha ta kaneis aptin arxi
 
         # Extract frames 1/1 from the video
         original_frames=extract_frames(video_path+video, frame_rate=1)
-             
+
         # Extract Data
-        encoded_objects,visual_features,audio_features = DataExtraction(video_path+video, annotation_path, info_path,getDataFlag=getDataFlag)
-       
+        visual_features,audio_features = DataExtraction(video_path+video, annotation_path, info_path,getDataFlag=getDataFlag)
+
         labels = getAnnotations(annotation_path, video.split('.')[0])
-        callNN(visual_features, audio_features, encoded_objects,labels=labels)
+        callNN(visual_features, audio_features,labels=labels)
         # # Calculate importance scores for this cluster
         # importance = calculate_importance(title_features, objects)
 
@@ -101,4 +101,4 @@ def videoSumm(annotation_path=None, info_path=None, video_path=None, summary_vid
         
     # return
     
-# videoSumm(annotation_path, info_path, video_path, summary_video_path, video_list)
+videoSumm(annotation_path, info_path, video_path, summary_video_path, video_list)

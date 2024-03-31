@@ -31,13 +31,13 @@ def train_model(model, train_loader, criterion, optimizer, num_epochs):
             loss.backward()
             optimizer.step()
             
-def prepare_frame_features(color_features, vgg_features, audio_features, objects_encoded):
+def prepare_frame_features(color_features, vgg_features, audio_features):
     """
     Prepares a single frame's features for model input.
     """
     # Assuming colors_features, vgg_features, audio_features, and objects_encoded are already in the correct format
     # and just need to be concatenated.
-    frame_features = torch.cat((color_features, vgg_features, audio_features, objects_encoded), 0).unsqueeze(0)  # Add batch dimension
+    frame_features = torch.cat((color_features, vgg_features, audio_features), 0).unsqueeze(0)  # Add batch dimension
 
     return frame_features
 
@@ -63,7 +63,7 @@ def evaluate_model(model, test_loader):
         test_acc = correct / total
         print('Test accuracy:', test_acc)
 
-def callNN(visual_features, audio_features, objects_encoded,labels):
+def callNN(visual_features, audio_features, labels):
     
     # Hyperparameters    
     batch_size = 10
@@ -83,22 +83,20 @@ def callNN(visual_features, audio_features, objects_encoded,labels):
     colors_features = torch.tensor(colors_features)
     vgg_features = torch.tensor(vgg_features)
     audio_features = torch.tensor(audio_features)
-    objects_encoded = torch.tensor(objects_encoded)
+    # objects_encoded = torch.tensor(objects_encoded)
     
     # CONCATENATE FEATURES
     frame_features=[]
     for i in range(len(colors_features)):
-        frame_features.append(prepare_frame_features(colors_features[i], vgg_features[i], audio_features[i], objects_encoded[i]))
+        frame_features.append(prepare_frame_features(colors_features[i], vgg_features[i], audio_features[i]))
     # output shape (1, 3*64 + 512 + 128 + 80) = (1, 912)
     
     # concatenate the labels with the frames
     # we have 20 labels for each frame
     # TODO: concatenate the labels with the frames
     
-    breakpoint()
     train_dataset = data.TensorDataset(frame_features, torch.tensor([1]))
     test_dataset = data.TensorDataset(frame_features, torch.tensor([1]))
-    breakpoint()
 
     # Create the train loader
     train_loader = data.DataLoader(train_dataset, batch_size=batch_size, shuffle=True)

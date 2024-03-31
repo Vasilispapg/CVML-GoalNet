@@ -77,7 +77,7 @@ def extract_visual_features(frames):
             img = img_to_array(img)              # Convert to array
             img = np.expand_dims(img, axis=0)    # Add batch dimension
             img = preprocess_input(img)          # Preprocess for VGG16
-            feature = model.predict(img,use_multiprocessing=True,workers=4)
+            feature = model.predict(img)
             features.append(feature.flatten())
 
     return features

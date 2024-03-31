@@ -3,3 +3,6 @@ SumMe
 __pycache__
 *.pt
 video
+*.mat
+*.h5
+*.tsv

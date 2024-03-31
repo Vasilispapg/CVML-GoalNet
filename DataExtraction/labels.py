@@ -7,5 +7,4 @@ def getAnnotations(annotation_path, videoID):
         for row in reader:
             if row[0] == videoID:
                 annotations.append(row[2].strip().split(','))
-        breakpoint()
     return annotations

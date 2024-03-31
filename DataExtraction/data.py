@@ -55,7 +55,7 @@ def extractData(video_path, anno_file, info_file,flag_to_extract):
         extract_audio_from_video(video_path, audio_output_path) 
 
         # Extract audio features
-        audio_features = extract_audio_features_for_each_frame(audio_output_path,num_frames=len(frames))
+        audio_features = extract_audio_features_for_each_frame(audio_output_path=audio_output_path,num_frames=len(frames))
         return_data.append(['audio',audio_features])
     else:
         return_data.append(None)
@@ -86,18 +86,20 @@ def DataExtraction(video_path, anno_file, info_file,getDataFlag=False):
     # Extract data from video
     objects=None
     
-    video=video_path.split('/')[-1].split('.')[0]
+    video=video_path.split('/')[-1].split('.')[0] # file name, bc video_path has the extension as well (namely `filename.extension`)
     
     # GetData
-    # we cant keep them in memory to big for too short videos
+    # we cant keep them in memory too big for too short videos
     frames = None
     
-    objects=getData('objects',video)
-    visual_features=getData('visual',video)
-    audio_features=getData('audio',video)
-    title_features=getData('title',video)
-    encoded_objects=getData('encoded_objects',video)
-    
+    # objects=getData('objects',video) # YOLO's prediction
+    visual_features=getData('visual',video) # VGG16 prediction. list[list[np.ndarray[np.float32]]]. Shape (461, 2, 192).
+    audio_features=getData('audio',video) # MFCC features. list[np.ndarray[np.float32]]. Shape (461, 128).
+    breakpoint()
+    # title_features=getData('title',video) # TOkenized (roberta?) features
+    # encoded_objects=getData('encoded_objects',video) # ObjectEmbeddingModel features (88 features)
+
+    # Poia apo afta den exeis? Kanta extract ola kai meta kanta false
     flag_to_extract=[True,True,True,True]
     if(frames is not None):
         flag_to_extract[0]=False
@@ -105,8 +107,8 @@ def DataExtraction(video_path, anno_file, info_file,getDataFlag=False):
         flag_to_extract[1]=False
     if(audio_features is not None):
         flag_to_extract[2]=False
-    if(title_features is not None):
-        flag_to_extract[3]=False
+    # if(title_features is not None):
+    #     flag_to_extract[3]=False
 
     
     if not getDataFlag:
@@ -115,24 +117,22 @@ def DataExtraction(video_path, anno_file, info_file,getDataFlag=False):
         # Save extracted Data
         for d in data:
             if d is not None:
-                if(d[0]=='objects'):
-                    objects=d[1]
-                elif(d[0]=='frames'):
+                if(d[0]=='frames'):
                     frames=d[1]
                 elif(d[0]=='visual'):
                     visual_features=d[1]
                 elif(d[0]=='audio'):
                     audio_features=d[1]
-                elif(d[0]=='title'):
-                    title_features=d[1]
+                # elif(d[0]=='title'):
+                #     title_features=d[1]
                 
                 saveData(d[0],d[1],video)
-                
-    if(objects is None):
-        encoded_objects,objects = detectObjects(frames,encoded_objects=encoded_objects,video=video,tokenizer=tokenizer)
-    else:
-        encoded_objects,objects = detectObjects(frames,objects,encoded_objects=encoded_objects,tokenizer=tokenizer)
-        
-    saveData('encoded_objects',encoded_objects,video)
 
-    return [encoded_objects,visual_features,audio_features]
+    # if(objects is None):
+    #     encoded_objects,objects = detectObjects(frames,encoded_objects=encoded_objects,video=video,tokenizer=tokenizer)
+    # else:
+    #     encoded_objects,objects = detectObjects(frames,objects,encoded_objects=encoded_objects,tokenizer=tokenizer)
+        
+    # saveData('encoded_objects',encoded_objects,video)
+
+    return [visual_features,audio_features]

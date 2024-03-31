@@ -22,17 +22,17 @@ def detectObjects(frames, objects=None,encoded_objects=None,video=None,tokenizer
     yolo_model, classes = loadYOLOv5()
     if objects is None:
         print('Detecting objects in frames...')
-        
+
         objects = detect_objects_in_all_frames(frames, yolo_model, classes)
         saveData('objects',objects,video)
 
     # Here, taking the first detected object
     objects = [frame_objects if frame_objects else [] for frame_objects in objects]
-    
+
     if encoded_objects is None:
         print('Processing detected objects...')
         encoded_objects = process_detected_objects(objects,classes)
-    
+
     print('Detected objects processed.')
-    
+
     return encoded_objects, objects
