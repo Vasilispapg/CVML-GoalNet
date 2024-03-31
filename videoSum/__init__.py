@@ -20,6 +20,7 @@ from videoCreator import create_video_from_frames
 from data import DataExtraction
 from model import callNN
 from labels import getAnnotations
+from audio import extract_audio_features_for_each_frame, extract_audio_from_video
 
 
 annotation_path='datasets/ydata-tvsum50-v1_1/data/ydata-tvsum50-anno.tsv' # Path for importantce (ground truth (partial))
@@ -38,19 +39,21 @@ def videoSumm(annotation_path=None, info_path=None, video_path=None, summary_vid
         #     continue
 
         print("VIDEO:",video)
-        getDataFlag=False # an tha pareis ta dedomena apta extracted i an tha ta kaneis aptin arxi
+        getDataFlag=True # an tha pareis ta dedomena apta extracted i an tha ta kaneis aptin arxi
 
         # Extract frames 1/1 from the video
         original_frames=extract_frames(video_path+video, frame_rate=1)
+        sample_frames=extract_frames(video_path+video)
 
         # Extract Data
-        visual_features,audio_features = DataExtraction(video_path+video, annotation_path, info_path,getDataFlag=getDataFlag)
+        audio_features = DataExtraction(video_path+video, annotation_path, info_path,getDataFlag=getDataFlag)
+        # ONLY AUDIO FEATURES HERE
+        
 
         labels = getAnnotations(annotation_path, video.split('.')[0])
-        callNN(visual_features, audio_features,labels=labels)
-        # # Calculate importance scores for this cluster
-        # importance = calculate_importance(title_features, objects)
-
+        
+        callNN(sample_frames,audio_features,labels=labels)
+        breakpoint()
         # Maping to 1/1 rate
         importance=map_scores_to_original_frames(importance, 15)
 
