@@ -6,3 +6,6 @@ video
 *.mat
 *.h5
 *.tsv
+*.pth
+*.md 
+*.wav
