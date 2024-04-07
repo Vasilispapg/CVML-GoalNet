@@ -7,6 +7,7 @@ from xception import xception
 from torch.utils.data import Dataset,DataLoader
 from time import time
 from torch.utils.data.dataset import random_split
+from torchsummary import summary
 
 
 # The `AudioVisualModel` class defines a neural network model that combines audio and visual features
@@ -19,15 +20,6 @@ class AudioVisualModel(nn.Module):
         self.visual_model.fc = nn.Identity()  # Adapt final layer based on Xception architecture
         self.conv1 = nn.Conv1d(in_channels=1, out_channels=16, kernel_size=3, stride=1, padding=1)
         
-        # as input shape (2048, 10, 10) from Xception
-        self.visual_model_expand = nn.Sequential(
-            # INPUT SHAPE (2048, 10, 10)
-            nn.Conv2d(2048, 1024, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(),
-            nn.Flatten(),
-            nn.LazyLinear(512),
-        )
-        # OUTPUT SHAPE (128)
 
         # Audio Branch (Simple CNN for MFCC)
         self.audio_model = nn.Sequential(
@@ -36,7 +28,7 @@ class AudioVisualModel(nn.Module):
             nn.Conv1d(16, 32, kernel_size=3, stride=1, padding=1),
             nn.ReLU(),
             nn.Flatten(),
-            nn.LazyLinear(5),  # Adjust size calculation based on your architecture
+            nn.LazyLinear(256),  # Adjust size calculation based on your architecture
             nn.ReLU()
         )
         # OUTPUT SHAPE (22,5)
@@ -48,9 +40,18 @@ class AudioVisualModel(nn.Module):
         # AUDIO FEATURES
         audio_features = self.audio_model(audio_input)
         # VISUAL FEATURES
-        xception_features = self.visual_model(visual_input)  # Extract features using Xception
-        visual_features = self.visual_model_expand(xception_features)  # Further process features with shape: [batch_size, feature_dim_visual]
+        with torch.no_grad():
+            xception_features = self.visual_model(visual_input)  # Extract features using Xception
+        
+        visual_features = nn.ReLU(inplace=True)(xception_features)
+        visual_features = F.adaptive_avg_pool2d(visual_features, (1, 1))
+        visual_features = visual_features.view(visual_features.size(0), -1)
+        visual_features = nn.Linear(2048, 512)(visual_features)
+        breakpoint()
+        # visual_features = self.visual_model_expand(xception_features)  # Further process features with shape: [batch_size, feature_dim_visual]
+        
         combined_features = torch.cat((audio_features, visual_features), axis = -1)
+       
         output = self.fusion(combined_features)
         output = F.softmax(output, dim=1)
         return output
@@ -70,10 +71,11 @@ def callNN(sample_visual_frames, audio_features, labels):
     dataset = DataLoaderFrameLabeled(frames = sample_visual_frames, audio = audio_features, labels = labels)
     
     avm = AudioVisualModel().to(device)
+    # model summary
 
     # Define the loss function and optimizer
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(avm.parameters())
+    optimizer = optim.Adam(avm.parameters(), lr=0.001)
     
     train_dataset, val_dataset, test_dataset = splitDataset(dataset)
     
@@ -82,43 +84,15 @@ def callNN(sample_visual_frames, audio_features, labels):
     
     # Test the model
     avm = testMode(avm, test_dataset, criterion, device)        
-        
+    exit(0)
     
     # Convert frames and audio features to PyTorch tensors
 
     # print(predictions)
     
 
-def trainMode(avm, train_dataset, val_dataset, num_epochs, optimizer, criterion, device):
-    """
-    The function `trainMode` trains a model using a specified optimizer and criterion over a specified
-    number of epochs on a training dataset, with periodic validation using a separate validation
-    dataset.
-    
-    :param avm: The `avm` parameter in the `trainMode` function is typically a neural network model that
-    you want to train. It stands for "Audio-Visual Model" in this context. This model is trained using
-    the provided `train_dataset` and validated using the `val_dataset` for a specified
-    :param train_dataset: The `train_dataset` parameter typically refers to the dataset used for
-    training the model. It contains the training samples along with their corresponding labels. This
-    dataset is used to update the model's parameters during the training process through backpropagation
-    :param val_dataset: The `val_dataset` parameter in the `trainMode` function is typically a dataset
-    used for validation during the training process. It is a separate dataset from the training dataset
-    and is used to evaluate the model's performance on unseen data and prevent overfitting. The
-    validation dataset is not used for training
-    :param num_epochs: The `num_epochs` parameter specifies the number of times the model will iterate
-    over the entire training dataset during the training process. It essentially determines how many
-    times the model will learn from the training data to improve its performance before the training
-    process is completed
-    :param optimizer: The optimizer parameter in the trainMode function is typically an instance of an
-    optimization algorithm such as SGD (Stochastic Gradient Descent), Adam, or RMSprop. It is used to
-    update the parameters of the model during training in order to minimize the loss function
-    :param criterion: The `criterion` parameter in the `trainMode` function is typically used to define
-    the loss function that will be optimized during training. Common choices for the `criterion` in deep
-    learning tasks include functions like `nn.CrossEntropyLoss` for classification tasks or `nn.MSELoss`
-    for
-    :return: The function `trainMode` returns the trained model (`avm`) after training it on the
-    train_dataset for the specified number of epochs and validating it on the val_dataset.
-    """
+def trainMode(avm, train_dataset, val_dataset, num_epochs, optimizer, criterion, device="cpu"):
+
     avm.train()
     time_ = time()
     print("Training Started")
@@ -127,22 +101,21 @@ def trainMode(avm, train_dataset, val_dataset, num_epochs, optimizer, criterion,
             frames = frames.to(device)
             audio = audio.to(device)
             labels = labels.to(device)
-            
             optimizer.zero_grad()
             output = avm(audio, frames)
             # output = torch.argmax(output, axis=1)
             loss = criterion(output, labels)
             loss.backward()
             optimizer.step()
-            print(f"Epoch: {epoch}, Batch: {i}, Loss: {loss.item()} Time: {time()-time_}")
+            print(f"Epoch: {epoch+1}, Batch: {i+1}, Loss: {loss.item()} Time: {time()-time_}")
             torch.cuda.empty_cache()
 
         # validation
-        print("Validation",end=' ')
-        avm = testMode(avm, val_dataset, criterion)
+        print("Validation")
+        avm = testMode(avm, val_dataset, criterion, device)
     return avm
 
-def testMode(avm, dataloader, criterion, device):
+def testMode(avm, dataloader, criterion, device="cpu"):
     avm.eval()
     correct = 0
     total = 0
@@ -159,8 +132,10 @@ def testMode(avm, dataloader, criterion, device):
             total += labels.size(0)
             correct += (predicted == labels).sum().item()
             acc = 100 * correct / total
-            
+        print('-'*30)
         print(f"Loss: {loss.item()}, Accuracy: {acc}")
+        print('-'*30)
+        
             
     return avm
     
@@ -177,7 +152,7 @@ def splitDataset(dataset):
     `train_loader`, `val_loader`, and `test_loader`. These DataLoader objects are used to load batches
     of data for training, validation, and testing purposes in machine learning models.
     """
-    batch_size = 8
+    batch_size = 32
     total_size = len(dataset)
     train_size = int(total_size * 0.7)
     val_size = int(total_size * 0.15)
@@ -196,14 +171,21 @@ def splitDataset(dataset):
 class DataLoaderFrameLabeled(Dataset):
     def __init__(self, frames,audio, labels):
         self.labels = torch.LongTensor(labels)
-        self.visual_frames_tensor = torch.stack([torch.tensor(frame).permute(2, 0, 1) for frame in frames])
-        self.audio_features_tensor= torch.tensor(audio)
+        self.visual_frames_tensor = torch.stack([torch.tensor(frame, dtype=torch.float).permute(2, 0, 1) for frame in frames]  )
+        self.audio_features_tensor= torch.tensor(audio,dtype=torch.float)
 
     def __len__(self):
         return len(self.labels)
+    
+    def normalize_visual_input(self, tensor):
+        # Normalize based on the Xception model's expected values
+        mean = torch.tensor([0.5, 0.5, 0.5], dtype=torch.float).view(3, 1, 1)
+        std = torch.tensor([0.5, 0.5, 0.5], dtype=torch.float).view(3, 1, 1)
+        return (tensor - mean) / std
 
     def __getitem__(self, idx):
         visual_frame_tensor = self.visual_frames_tensor[idx]
+        visual_frame_tensor = self.normalize_visual_input(visual_frame_tensor)
         audio_feature_tensor =self.audio_features_tensor[idx]
         label = self.labels[idx]
 
