@@ -53,7 +53,6 @@ def videoSumm(annotation_path=None, info_path=None, video_path=None, summary_vid
         labels = getAnnotations(annotation_path, video.split('.')[0])
         
         callNN(sample_frames,audio_features,labels=labels)
-        breakpoint()
         # Maping to 1/1 rate
         importance=map_scores_to_original_frames(importance, 15)
 
