@@ -8,7 +8,29 @@ from torch.utils.data import Dataset,DataLoader
 from time import time
 from torch.utils.data.dataset import random_split
 from torchsummary import summary
+import os
 
+
+def display_tensor_info(tnsr, var_name):
+    print('---')
+    print('variable name: %s'%(var_name))
+    print('Shape: ')
+    print(tuple(tnsr.shape))
+    print()
+    print('Mean: ')
+    print(torch.mean(tnsr).item())
+    print()
+    print('Variance: ')
+    print(torch.var(tnsr).item())
+    print()
+    print('Min, Max: ')
+    print(torch.min(tnsr).item(), torch.max(tnsr).item())
+    print()
+    print('Exists NAN')
+    print(True in torch.isnan(tnsr))
+    if True in torch.isnan(tnsr):
+        exit('ERROR')
+    print('---')
 
 # The `AudioVisualModel` class defines a neural network model that combines audio and visual features
 # extracted from MFCC and Xception models respectively, and makes a decision using softmax activation.
@@ -31,12 +53,14 @@ class AudioVisualModel(nn.Module):
             nn.LazyLinear(256),  # Adjust size calculation based on your architecture
             nn.ReLU()
         )
+        
         # OUTPUT SHAPE (22,5)
 
         # Fusion and Decision Making using softmax
         self.fusion = nn.LazyLinear(5)
 
     def forward(self, audio_input, visual_input): # audio_input: MFCC features, visual_input: Frames
+        # display_tensor_info(tnsr = visual_input, var_name = 'visual_input')
         # AUDIO FEATURES
         audio_features = self.audio_model(audio_input)
         # VISUAL FEATURES
@@ -46,21 +70,31 @@ class AudioVisualModel(nn.Module):
         visual_features = nn.ReLU(inplace=True)(xception_features)
         visual_features = F.adaptive_avg_pool2d(visual_features, (1, 1))
         visual_features = visual_features.view(visual_features.size(0), -1)
-        visual_features = nn.Linear(2048, 512)(visual_features)
-        breakpoint()
+        visual_features = nn.LazyLinear(512).to(visual_features.device)(visual_features)
         # visual_features = self.visual_model_expand(xception_features)  # Further process features with shape: [batch_size, feature_dim_visual]
-        
+
+        # FUSE
         combined_features = torch.cat((audio_features, visual_features), axis = -1)
-       
+
         output = self.fusion(combined_features)
         output = F.softmax(output, dim=1)
         return output
+
+def saveModel(model, path):
+    torch.save(model.state_dict(), path)
     
+def loadModel(model, path):
+    if(not os.path.exists(path)):
+        return None
+    model.load_state_dict(torch.load(path))
+    return model
+
 
 def callNN(sample_visual_frames, audio_features, labels):
     # labels is a list with size n_annotators, where each list contains the importance with size n_all_frames
     # Hyperparameters    
-    num_epochs = 2
+    
+    num_epochs = 1
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
@@ -70,12 +104,15 @@ def callNN(sample_visual_frames, audio_features, labels):
     
     dataset = DataLoaderFrameLabeled(frames = sample_visual_frames, audio = audio_features, labels = labels)
     
-    avm = AudioVisualModel().to(device)
-    # model summary
+    avm = loadModel(AudioVisualModel(), os.path.join(os.getcwd(), 'model.pth'))
+    if(avm == None):
+        print("Creating a new model")
+        avm = AudioVisualModel()
+    avm = avm.to(device)
 
     # Define the loss function and optimizer
     criterion = nn.CrossEntropyLoss()
-    optimizer = optim.Adam(avm.parameters(), lr=0.001)
+    optimizer = optim.Adam(avm.parameters(), lr=0.0002)
     
     train_dataset, val_dataset, test_dataset = splitDataset(dataset)
     
@@ -84,11 +121,9 @@ def callNN(sample_visual_frames, audio_features, labels):
     
     # Test the model
     avm = testMode(avm, test_dataset, criterion, device)        
-    exit(0)
-    
-    # Convert frames and audio features to PyTorch tensors
 
-    # print(predictions)
+    saveModel(avm, os.path.join(os.getcwd(), 'model.pth'))
+    print(f"File saved at {os.getcwd()}/model.pth")
     
 
 def trainMode(avm, train_dataset, val_dataset, num_epochs, optimizer, criterion, device="cpu"):
@@ -111,6 +146,8 @@ def trainMode(avm, train_dataset, val_dataset, num_epochs, optimizer, criterion,
             torch.cuda.empty_cache()
 
         # validation
+        print('TRAIN')
+        testMode(avm, train_dataset, criterion, device)
         print("Validation")
         avm = testMode(avm, val_dataset, criterion, device)
     return avm
@@ -169,7 +206,7 @@ def splitDataset(dataset):
 # This class `DataLoaderFrameLabeled` is a custom dataset class in PyTorch for loading labeled visual
 # frames and audio features.
 class DataLoaderFrameLabeled(Dataset):
-    def __init__(self, frames,audio, labels):
+    def __init__(self, frames, audio, labels):
         self.labels = torch.LongTensor(labels)
         self.visual_frames_tensor = torch.stack([torch.tensor(frame, dtype=torch.float).permute(2, 0, 1) for frame in frames]  )
         self.audio_features_tensor= torch.tensor(audio,dtype=torch.float)
@@ -181,7 +218,7 @@ class DataLoaderFrameLabeled(Dataset):
         # Normalize based on the Xception model's expected values
         mean = torch.tensor([0.5, 0.5, 0.5], dtype=torch.float).view(3, 1, 1)
         std = torch.tensor([0.5, 0.5, 0.5], dtype=torch.float).view(3, 1, 1)
-        return (tensor - mean) / std
+        return (tensor - mean) / (std + 0.001)
 
     def __getitem__(self, idx):
         visual_frame_tensor = self.visual_frames_tensor[idx]

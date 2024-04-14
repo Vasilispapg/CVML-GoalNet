@@ -71,6 +71,27 @@ def extractData(video_path, anno_file, info_file,flag_to_extract):
     return return_data
 
 
+def DataAudioExtraction(video_path, anno_file, info_file):
+    video=video_path.split('/')[-1].split('.')[0] # file name, bc video_path has the extension as well (namely `filename.extension`)
+    
+    audio_features=getData('audio',video) # MFCC features. list[np.ndarray[np.float32]]. Shape (461, 128).
+        
+    if(audio_features is None):
+        # Extract data from video and save it
+        data=extractData(video_path, anno_file, info_file,[True,False,True,False])
+        # Save extracted Data
+        for d in data:
+            if d is not None:
+                if(d[0]=='frames'):
+                    frames=d[1]
+                elif(d[0]=='audio'):
+                    audio_features=d[1]
+                saveData(d[0],d[1],video)
+                
+    return audio_features
+
+    
+
 def DataExtraction(video_path, anno_file, info_file,getDataFlag=False):
     """
     Integrate visual, audio, and annotation features from a video,
@@ -95,8 +116,8 @@ def DataExtraction(video_path, anno_file, info_file,getDataFlag=False):
     # objects=getData('objects',video) # YOLO's prediction
     visual_features=getData('visual',video) # VGG16 prediction. list[list[np.ndarray[np.float32]]]. Shape (461, 2, 192).
     audio_features=getData('audio',video) # MFCC features. list[np.ndarray[np.float32]]. Shape (461, 128).
-    # title_features=getData('title',video) # TOkenized (roberta?) features
-    # encoded_objects=getData('encoded_objects',video) # ObjectEmbeddingModel features (88 features)
+    title_features=getData('title',video) # TOkenized (roberta?) features
+    encoded_objects=getData('encoded_objects',video) # ObjectEmbeddingModel features (88 features)
 
     # Poia apo afta den exeis? Kanta extract ola kai meta kanta false
     flag_to_extract=[True,True,True,True]
@@ -122,16 +143,16 @@ def DataExtraction(video_path, anno_file, info_file,getDataFlag=False):
                     visual_features=d[1]
                 elif(d[0]=='audio'):
                     audio_features=d[1]
-                # elif(d[0]=='title'):
-                #     title_features=d[1]
+                elif(d[0]=='title'):
+                    title_features=d[1]
                 
                 saveData(d[0],d[1],video)
 
-    # if(objects is None):
-    #     encoded_objects,objects = detectObjects(frames,encoded_objects=encoded_objects,video=video,tokenizer=tokenizer)
-    # else:
-    #     encoded_objects,objects = detectObjects(frames,objects,encoded_objects=encoded_objects,tokenizer=tokenizer)
+    if(objects is None):
+        encoded_objects,objects = detectObjects(frames,encoded_objects=encoded_objects,video=video,tokenizer=tokenizer)
+    else:
+        encoded_objects,objects = detectObjects(frames,objects,encoded_objects=encoded_objects,tokenizer=tokenizer)
         
-    # saveData('encoded_objects',encoded_objects,video)
+    saveData('encoded_objects',encoded_objects,video)
 
     return audio_features

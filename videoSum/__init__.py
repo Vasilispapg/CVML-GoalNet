@@ -17,8 +17,8 @@ from knapsack import knapsack_for_video_summary
 from fscoreEval import evaluation_method
 from deletePkl import deletePKLfiles
 from videoCreator import create_video_from_frames
-from data import DataExtraction
-from model import callNN
+from data import DataAudioExtraction
+from model import callNN, display_tensor_info
 from labels import getAnnotations
 from audio import extract_audio_features_for_each_frame, extract_audio_from_video
 
@@ -32,7 +32,6 @@ video_list = [video for video in os.listdir(video_path) if video.endswith('.mp4'
 
 
 def videoSumm(annotation_path=None, info_path=None, video_path=None, summary_video_path=None,video_list=None):
-    video_list=['-esJrBWj2d8.mp4']
     for video in video_list: 
 
         # if(os.path.exists(f'{summary_video_path}{video}')):
@@ -45,14 +44,23 @@ def videoSumm(annotation_path=None, info_path=None, video_path=None, summary_vid
         original_frames=extract_frames(video_path+video, frame_rate=1)
         sample_frames=extract_frames(video_path+video)
 
+        # toIndexTheloume = -1
+        # for idx, el in enumerate(sample_frames):
+        #     if idx == 357:
+        #         print('idx:', idx)
+        #         print('el.mean:',np.mean(el))
+        #         print(el)
+        # 357 GAMIESAI
+
         # Extract Data
-        audio_features = DataExtraction(video_path+video, annotation_path, info_path,getDataFlag=getDataFlag)
+        audio_features = DataAudioExtraction(video_path+video,anno_file=annotation_path,info_file=info_path)
         # ONLY AUDIO FEATURES HERE
         
 
         labels = getAnnotations(annotation_path, video.split('.')[0])
         
         callNN(sample_frames,audio_features,labels=labels)
+        continue
         # Maping to 1/1 rate
         importance=map_scores_to_original_frames(importance, 15)
 
