@@ -103,7 +103,7 @@ def callNN(sample_visual_frames, audio_features, labels):
     # Refine descriptors - avm: Audio visual model
     
     dataset = DataLoaderFrameLabeled(frames = sample_visual_frames, audio = audio_features, labels = labels)
-    
+
     avm = loadModel(AudioVisualModel(), os.path.join(os.getcwd(), 'model.pth'))
     if(avm == None):
         print("Creating a new model")
@@ -223,7 +223,7 @@ class DataLoaderFrameLabeled(Dataset):
     def __getitem__(self, idx):
         visual_frame_tensor = self.visual_frames_tensor[idx]
         visual_frame_tensor = self.normalize_visual_input(visual_frame_tensor)
-        audio_feature_tensor =self.audio_features_tensor[idx]
+        audio_feature_tensor =  self.audio_features_tensor[idx]
         label = self.labels[idx]
 
         return visual_frame_tensor, audio_feature_tensor, label
