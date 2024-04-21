@@ -90,22 +90,40 @@ def loadModel(model, path):
     return model
 
 
-def callNN(sample_visual_frames, audio_features, labels,test_dataset):
-    # labels is a list with size n_annotators, where each list contains the importance with size n_all_frames
-    # Hyperparameters    
+def callNN(sample_visual_frames, audio_features, labels,test_dataset,val_dataset):  
+    """
+    This function trains an audio-visual model using provided data and then uses the model to produce
+    labels for full video frames.
+    
+    :param sample_visual_frames: Sample visual frames for training the model
+    :param audio_features: Audio features extracted from the audio of the video frames
+    :param labels: The `labels` parameter in the `callNN` function represents the ground truth labels
+    for the training data. These labels are used during the training process to calculate the loss and
+    optimize the model parameters. The function seems to be a part of a neural network training pipeline
+    where the model is trained on visual
+    :param test_dataset: The `test_dataset` parameter in the `callNN` function seems to represent a
+    tuple containing three elements:
+    :param val_dataset: The `val_dataset` parameter in the `callNN` function refers to the validation
+    dataset that is used to evaluate the performance of the model during training. It typically consists
+    of visual frames, audio features, and corresponding labels for validation purposes. This dataset
+    helps in monitoring the model's performance on unseen data
+    :return: The function `callNN` is returning the `labels` that are produced by the model after
+    training and testing on the provided datasets.
+    """
     
     num_epochs = 1
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
-
     
-    # Initialize your model
-    # Refine descriptors - avm: Audio visual model
-    
+    # dataset for train and full_video to produce labels
     dataset = DataLoaderFrameLabeled(frames = sample_visual_frames, audio = audio_features, labels = labels)
     full_video_dataloader=DataLoader(dataset, batch_size=64, shuffle=False)
     
+    # Generate test and validation datasets
     dataset_test = DataLoaderFrameLabeled(frames = test_dataset[0], audio = test_dataset[1], labels = test_dataset[2])
+    dataset_val = DataLoaderFrameLabeled(frames = val_dataset[0], audio = val_dataset[1], labels = val_dataset[2])
+    
+    # Init the model
     avm = loadModel(AudioVisualModel(), os.path.join(os.getcwd(), 'model.pth'))
     if(avm == None):
         print("Creating a new model")
@@ -116,24 +134,25 @@ def callNN(sample_visual_frames, audio_features, labels,test_dataset):
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(avm.parameters(), lr=0.0002)
     
-    train_dataset, val_dataset, test_dataset = splitDataset(dataset,dataset_test)
+    train_dataset, val_dataset, test_dataset = GenerateDatasets(dataset,dataset_test,dataset_val)
     
     # Train the model
     avm = trainMode(avm, train_dataset, val_dataset, num_epochs, optimizer, criterion, device)
     
     # Test the model
+    print('Testing')
     avm = testMode(avm, test_dataset, criterion, device)        
 
     saveModel(avm, os.path.join(os.getcwd(), 'model.pth'))
     print(f"File saved at {os.getcwd()}/model.pth")
     
+    print("Producing Labels")
     labels=produceLabels(avm, full_video_dataloader, device)
     
     return labels
     
 def produceLabels(avm, dataloader,device):
     avm.eval()
-    print("Producing Labels")
     with torch.no_grad():
         labels = []
         for (frames, audio, _) in dataloader:
@@ -165,7 +184,7 @@ def trainMode(avm, train_dataset, val_dataset, num_epochs, optimizer, criterion,
             torch.cuda.empty_cache()
 
         # validation
-        print('TRAIN')
+        print('Training')
         testMode(avm, train_dataset, criterion, device)
         print("Validation")
         avm = testMode(avm, val_dataset, criterion, device)
@@ -195,28 +214,28 @@ def testMode(avm, dataloader, criterion, device="cpu"):
             
     return avm
     
-def splitDataset(dataset,dataset_test):
+def GenerateDatasets(dataset,dataset_test,dataset_val):
     """
-    The function `splitDataset` takes a dataset and splits it into training, validation, and test sets
-    with specified sizes and returns data loaders for each set.
+    The function `GenerateDatasets` creates data loaders for training, validation, and testing datasets
+    with specified batch sizes and shuffle settings.
     
-    :param dataset: The `dataset` parameter in the `splitDataset` function refers to the dataset that
-    you want to split into training, validation, and test sets. This dataset could be any collection of
-    data that you want to use for training a machine learning model, such as images, text, or numerical
-    data
-    :return: The function `splitDataset(dataset)` returns a list containing three DataLoader objects:
+    :param dataset: The `dataset` parameter is typically a dataset object that contains the training
+    data samples. This dataset object is used to create a DataLoader for the training set
+    :param dataset_test: It seems like you were about to provide some information about the
+    `dataset_test` parameter but the message got cut off.
+    :param dataset_val: It seems like you were about to provide some information about the `dataset_val`
+    parameter, but the message got cut off. Could you please provide more details or let me know how I
+    can assist you further with the `dataset_val` parameter?
+    :return: The function `GenerateDatasets` returns a list containing three DataLoader objects:
     `train_loader`, `val_loader`, and `test_loader`. These DataLoader objects are used to load batches
-    of data for training, validation, and testing purposes in machine learning models.
+    of data for training, validation, and testing purposes.
     """
+
     batch_size = 64
-    total_size = len(dataset)
-    train_size = int(total_size * 0.8)
-    val_size = total_size - train_size
     # Ensure the test set gets any remaining samples after integer division
 
-    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
-    train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
-    val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
+    train_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+    val_loader = DataLoader(dataset_val, batch_size=batch_size, shuffle=False)
     test_loader = DataLoader(dataset_test, batch_size=batch_size, shuffle=False)
     
     return [train_loader, val_loader, test_loader]
