@@ -90,7 +90,7 @@ def loadModel(model, path):
     return model
 
 
-def callNN(sample_visual_frames, audio_features, labels):
+def callNN(sample_visual_frames, audio_features, labels,test_dataset):
     # labels is a list with size n_annotators, where each list contains the importance with size n_all_frames
     # Hyperparameters    
     
@@ -103,7 +103,9 @@ def callNN(sample_visual_frames, audio_features, labels):
     # Refine descriptors - avm: Audio visual model
     
     dataset = DataLoaderFrameLabeled(frames = sample_visual_frames, audio = audio_features, labels = labels)
-
+    full_video_dataloader=DataLoader(dataset, batch_size=64, shuffle=False)
+    
+    dataset_test = DataLoaderFrameLabeled(frames = test_dataset[0], audio = test_dataset[1], labels = test_dataset[2])
     avm = loadModel(AudioVisualModel(), os.path.join(os.getcwd(), 'model.pth'))
     if(avm == None):
         print("Creating a new model")
@@ -114,7 +116,7 @@ def callNN(sample_visual_frames, audio_features, labels):
     criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(avm.parameters(), lr=0.0002)
     
-    train_dataset, val_dataset, test_dataset = splitDataset(dataset)
+    train_dataset, val_dataset, test_dataset = splitDataset(dataset,dataset_test)
     
     # Train the model
     avm = trainMode(avm, train_dataset, val_dataset, num_epochs, optimizer, criterion, device)
@@ -125,6 +127,23 @@ def callNN(sample_visual_frames, audio_features, labels):
     saveModel(avm, os.path.join(os.getcwd(), 'model.pth'))
     print(f"File saved at {os.getcwd()}/model.pth")
     
+    labels=produceLabels(avm, full_video_dataloader, device)
+    
+    return labels
+    
+def produceLabels(avm, dataloader,device):
+    avm.eval()
+    print("Producing Labels")
+    with torch.no_grad():
+        labels = []
+        for (frames, audio, _) in dataloader:
+            frames = frames.to(device)
+            audio = audio.to(device)
+            output = avm(audio, frames)
+            _, predicted_indices = torch.max(output.data, 1)
+            labels.extend(predicted_indices)
+                
+    return  [l.to('cpu') for l in labels]
 
 def trainMode(avm, train_dataset, val_dataset, num_epochs, optimizer, criterion, device="cpu"):
 
@@ -176,7 +195,7 @@ def testMode(avm, dataloader, criterion, device="cpu"):
             
     return avm
     
-def splitDataset(dataset):
+def splitDataset(dataset,dataset_test):
     """
     The function `splitDataset` takes a dataset and splits it into training, validation, and test sets
     with specified sizes and returns data loaders for each set.
@@ -189,17 +208,16 @@ def splitDataset(dataset):
     `train_loader`, `val_loader`, and `test_loader`. These DataLoader objects are used to load batches
     of data for training, validation, and testing purposes in machine learning models.
     """
-    batch_size = 32
+    batch_size = 64
     total_size = len(dataset)
-    train_size = int(total_size * 0.7)
-    val_size = int(total_size * 0.15)
+    train_size = int(total_size * 0.8)
+    val_size = total_size - train_size
     # Ensure the test set gets any remaining samples after integer division
-    test_size = total_size - train_size - val_size
 
-    train_dataset, val_dataset, test_dataset = random_split(dataset, [train_size, val_size, test_size])
+    train_dataset, val_dataset = random_split(dataset, [train_size, val_size])
     train_loader = DataLoader(train_dataset, batch_size=batch_size, shuffle=True)
     val_loader = DataLoader(val_dataset, batch_size=batch_size, shuffle=False)
-    test_loader = DataLoader(test_dataset, batch_size=batch_size, shuffle=False)
+    test_loader = DataLoader(dataset_test, batch_size=batch_size, shuffle=False)
     
     return [train_loader, val_loader, test_loader]
 
@@ -227,9 +245,4 @@ class DataLoaderFrameLabeled(Dataset):
         label = self.labels[idx]
 
         return visual_frame_tensor, audio_feature_tensor, label
-
-
-# d240407
-# TODO - Dataloader Done
-# TODO - Training Loop
  

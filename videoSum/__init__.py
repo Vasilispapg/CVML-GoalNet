@@ -18,9 +18,8 @@ from fscoreEval import evaluation_method
 from deletePkl import deletePKLfiles
 from videoCreator import create_video_from_frames
 from data import DataAudioExtraction
-from model import callNN, display_tensor_info
+from model import callNN
 from labels import getAnnotations
-from audio import extract_audio_features_for_each_frame, extract_audio_from_video
 
 
 annotation_path='datasets/ydata-tvsum50-v1_1/data/ydata-tvsum50-anno.tsv' # Path for importantce (ground truth (partial))
@@ -29,28 +28,23 @@ video_path='datasets/ydata-tvsum50-v1_1/video/' # Input videos
 summary_video_path='datasets/summary_videos/' # Output pou vazoume ta video summaries
 ground_truth_path='datasets/ydata-tvsum50-v1_1/ground_truth/ydata-tvsum50.mat' # Katigoria annotation users etc (ground truth partial)
 video_list = [video for video in os.listdir(video_path) if video.endswith('.mp4')]  # List comprehension
+test_video= video_list.pop(-1)  # get as test video the last video
 
+test_dataset= [extract_frames(video_path+test_video), 
+               DataAudioExtraction(video_path+test_video,anno_file=annotation_path,info_file=info_path),
+               getAnnotations(annotation_path, test_video.split('.')[0])]
 
 def videoSumm(annotation_path=None, info_path=None, video_path=None, summary_video_path=None,video_list=None):
     for video in video_list: 
 
-        # if(os.path.exists(f'{summary_video_path}{video}')):
-        #     continue
+        if(os.path.exists(f'{summary_video_path}{video}')):
+            continue
 
         print("VIDEO:",video)
-        getDataFlag=True # an tha pareis ta dedomena apta extracted i an tha ta kaneis aptin arxi
 
         # Extract frames 1/1 from the video
         original_frames=extract_frames(video_path+video, frame_rate=1)
         sample_frames=extract_frames(video_path+video)
-
-        # toIndexTheloume = -1
-        # for idx, el in enumerate(sample_frames):
-        #     if idx == 357:
-        #         print('idx:', idx)
-        #         print('el.mean:',np.mean(el))
-        #         print(el)
-        # 357 GAMIESAI
 
         # Extract Data
         audio_features = DataAudioExtraction(video_path+video,anno_file=annotation_path,info_file=info_path)
@@ -59,8 +53,9 @@ def videoSumm(annotation_path=None, info_path=None, video_path=None, summary_vid
 
         labels = getAnnotations(annotation_path, video.split('.')[0])
         
-        callNN(sample_frames,audio_features,labels=labels)
-        continue
+        
+        importance=callNN(sample_frames,audio_features,labels=labels,test_dataset=test_dataset)
+        
         # Maping to 1/1 rate
         importance=map_scores_to_original_frames(importance, 15)
 
