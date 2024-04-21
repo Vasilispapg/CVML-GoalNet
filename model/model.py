@@ -9,6 +9,7 @@ from time import time
 from torch.utils.data.dataset import random_split
 from torchsummary import summary
 import os
+from transformers import ViTModel, ViTFeatureExtractor,ViTConfig
 
 
 def display_tensor_info(tnsr, var_name):
@@ -32,9 +33,9 @@ def display_tensor_info(tnsr, var_name):
         exit('ERROR')
     print('---')
 
-# The `AudioVisualModel` class defines a neural network model that combines audio and visual features
+# The `AudioVisualModelXception` class defines a neural network model that combines audio and visual features
 # extracted from MFCC and Xception models respectively, and makes a decision using softmax activation.
-class AudioVisualModel(nn.Module):
+class AudioVisualModelXception(nn.Module):
     def __init__(self):
         super(AudioVisualModel, self).__init__()
         # Visual Branch (Xception)
@@ -80,6 +81,65 @@ class AudioVisualModel(nn.Module):
         output = F.softmax(output, dim=1)
         return output
 
+class AudioVisualModel(nn.Module):
+    def __init__(self):
+        super(AudioVisualModel, self).__init__()
+        # Visual Branch (ViT)
+        self.configuration = ViTConfig()
+        self.configuration.update({"hidden_dropout_prob ": 0.4})
+        self.configuration.update({"attention_probs_dropout_prob  ": 0.4})
+        
+        self.feature_extractor = ViTFeatureExtractor.from_pretrained('google/vit-base-patch16-224')
+        self.visual_model = ViTModel(self.configuration) 
+        self.configuration = self.visual_model.config
+
+        self.visual_projection = nn.Linear(self.visual_model.config.hidden_size, 512, bias=True)
+        
+        # Audio Branch (Simple CNN for MFCC)
+        self.audio_model = nn.Sequential(
+            nn.Conv1d(in_channels=30, out_channels=16, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Conv1d(16, 32, kernel_size=3, stride=1, padding=1),
+            nn.ReLU(),
+            nn.Flatten(),
+            nn.LazyLinear(256),  # Adjust size calculation based on your architecture
+            nn.ReLU()
+        )
+
+        # Fusion and Decision Making
+        self.fusion = nn.LazyLinear(5)  # Output shape (22, 5)
+        
+        
+    def normalize_visual_input(self, tensor):
+        # Scale images to [0, 1]
+        return tensor / 255.0
+
+    def forward(self, audio_input, visual_input):
+        # Assuming audio_input is already on the correct device
+        device = audio_input.device
+        visual_input = visual_input.to(device)  # Ensure same device
+        # display_tensor_info(visual_input, 'PreNormalized visual input')
+
+        # Normalize and debug print
+        visual_input = self.normalize_visual_input(visual_input)
+        # display_tensor_info(visual_input, 'Normalized visual input')
+        # breakpoint()
+        # Prepare inputs for ViT
+        # with torch.no_grad():
+        inputs = self.feature_extractor(images=visual_input, return_tensors="pt").to(device)
+        visual_outputs = self.visual_model(**inputs)
+        visual_features = visual_outputs.last_hidden_state[:, 0, :]
+        visual_features = self.visual_projection(visual_features)
+
+        # Process audio features
+        audio_features = self.audio_model(audio_input)
+
+        # Fuse and softmax
+        combined_features = torch.cat((audio_features, visual_features), dim=-1)
+        output = self.fusion(combined_features)
+        output = F.softmax(output, dim=1)
+        return output
+
 def saveModel(model, path):
     torch.save(model.state_dict(), path)
     
@@ -88,7 +148,6 @@ def loadModel(model, path):
         return None
     model.load_state_dict(torch.load(path))
     return model
-
 
 def callNN(sample_visual_frames, audio_features, labels,test_dataset,val_dataset):  
     """
@@ -111,7 +170,7 @@ def callNN(sample_visual_frames, audio_features, labels,test_dataset,val_dataset
     training and testing on the provided datasets.
     """
     
-    num_epochs = 1
+    num_epochs = 2
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
     
@@ -160,6 +219,7 @@ def produceLabels(avm, dataloader,device):
             audio = audio.to(device)
             output = avm(audio, frames)
             _, predicted_indices = torch.max(output.data, 1)
+            # add 1 to the indices to match the original labels
             labels.extend(predicted_indices)
                 
     return  [l.to('cpu') for l in labels]
@@ -234,7 +294,7 @@ def GenerateDatasets(dataset,dataset_test,dataset_val):
     batch_size = 64
     # Ensure the test set gets any remaining samples after integer division
 
-    train_loader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+    train_loader = DataLoader(dataset, batch_size=batch_size, shuffle=False)
     val_loader = DataLoader(dataset_val, batch_size=batch_size, shuffle=False)
     test_loader = DataLoader(dataset_test, batch_size=batch_size, shuffle=False)
     
@@ -251,15 +311,16 @@ class DataLoaderFrameLabeled(Dataset):
     def __len__(self):
         return len(self.labels)
     
-    def normalize_visual_input(self, tensor):
+    def normalize_visual_input_for_xception(self, tensor):
         # Normalize based on the Xception model's expected values
         mean = torch.tensor([0.5, 0.5, 0.5], dtype=torch.float).view(3, 1, 1)
         std = torch.tensor([0.5, 0.5, 0.5], dtype=torch.float).view(3, 1, 1)
         return (tensor - mean) / (std + 0.001)
 
+
     def __getitem__(self, idx):
         visual_frame_tensor = self.visual_frames_tensor[idx]
-        visual_frame_tensor = self.normalize_visual_input(visual_frame_tensor)
+        # visual_frame_tensor = self.normalize_visual_input_for_xception(visual_frame_tensor)
         audio_feature_tensor =  self.audio_features_tensor[idx]
         label = self.labels[idx]
 
