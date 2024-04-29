@@ -29,14 +29,14 @@ def extractData(video_path, flag_to_extract):
     return return_data
 
 
-def DataAudioExtraction(video_path, info_file):
+def DataAudioExtraction(video_path):
     video=video_path.split('/')[-1].split('.')[0] # file name, bc video_path has the extension as well (namely `filename.extension`)
     
     audio_features=getData('audio',video) # MFCC features. list[np.ndarray[np.float32]]. Shape (461, 128).
         
     if(audio_features is None):
         # Extract data from video and save it
-        data=extractData(video_path, info_file,[True,True])
+        data=extractData(video_path,[True,True])
         # Save extracted Data
         for d in data:
             if d is not None:

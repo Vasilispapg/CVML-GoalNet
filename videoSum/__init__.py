@@ -4,6 +4,7 @@ sys.path.append('DataExtraction')
 sys.path.append('Evaluation')
 sys.path.append('videoSum')
 sys.path.append('knapsack')
+sys.path.append('model')
 import os
 import numpy as np
 
@@ -30,14 +31,14 @@ video_list = [video for video in os.listdir(video_path) if video.endswith('.mp4'
 # extract the frames from the test video
 test_video= video_list.pop(random.randint(0,len(video_list)-1))  # get as test video a random video
 test_dataset= [extract_frames(video_path+test_video), 
-               DataAudioExtraction(video_path+test_video,anno_file=annotation_path,info_file=info_path),
+               DataAudioExtraction(video_path+test_video),
                getAnnotations(annotation_path, test_video.split('.')[0])]
 
 # extract the frames from validation video
 validation_video= video_list.pop(random.randint(0,len(video_list)-1))  # get as validation video the last video
 
 val_dataset  = [extract_frames(video_path+validation_video),
-                DataAudioExtraction(video_path+validation_video,anno_file=annotation_path,info_file=info_path),
+                DataAudioExtraction(video_path+validation_video),
                 getAnnotations(annotation_path, validation_video.split('.')[0])]
 
 print("Test Video:",test_video
@@ -57,7 +58,7 @@ def videoSumm(annotation_path=None, info_path=None, video_path=None, summary_vid
         sample_frames=extract_frames(video_path+video)
 
         # Extract Data
-        audio_features = DataAudioExtraction(video_path+video,anno_file=annotation_path,info_file=info_path)
+        audio_features = DataAudioExtraction(video_path+video)
         # ONLY AUDIO FEATURES HERE
         
         labels = getAnnotations(annotation_path, video.split('.')[0])

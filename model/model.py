@@ -2,14 +2,10 @@ import torch
 import torch.nn as nn
 import torch.optim as optim
 from torch.nn import functional as F
-# dn eimai sigoyros
 from xception import xception
 from torch.utils.data import Dataset,DataLoader
 from time import time
-from torch.utils.data.dataset import random_split
-from torchsummary import summary
 import os
-from transformers import ViTModel, ViTFeatureExtractor,ViTConfig
 
 
 def display_tensor_info(tnsr, var_name):
@@ -37,7 +33,7 @@ def display_tensor_info(tnsr, var_name):
 # extracted from MFCC and Xception models respectively, and makes a decision using softmax activation.
 class AudioVisualModelXception(nn.Module):
     def __init__(self):
-        super(AudioVisualModel, self).__init__()
+        super(AudioVisualModelXception, self).__init__()
         # Visual Branch (Xception)
         self.visual_model = xception(num_classes=1000)
         self.visual_model.fc = nn.Identity()  # Adapt final layer based on Xception architecture
@@ -77,65 +73,6 @@ class AudioVisualModelXception(nn.Module):
         # FUSE
         combined_features = torch.cat((audio_features, visual_features), axis = -1)
 
-        output = self.fusion(combined_features)
-        output = F.softmax(output, dim=1)
-        return output
-
-class AudioVisualModel(nn.Module):
-    def __init__(self):
-        super(AudioVisualModel, self).__init__()
-        # Visual Branch (ViT)
-        self.configuration = ViTConfig()
-        self.configuration.update({"hidden_dropout_prob ": 0.4})
-        self.configuration.update({"attention_probs_dropout_prob  ": 0.4})
-        
-        self.feature_extractor = ViTFeatureExtractor.from_pretrained('google/vit-base-patch16-224')
-        self.visual_model = ViTModel(self.configuration) 
-        self.configuration = self.visual_model.config
-
-        self.visual_projection = nn.Linear(self.visual_model.config.hidden_size, 512, bias=True)
-        
-        # Audio Branch (Simple CNN for MFCC)
-        self.audio_model = nn.Sequential(
-            nn.Conv1d(in_channels=30, out_channels=16, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(),
-            nn.Conv1d(16, 32, kernel_size=3, stride=1, padding=1),
-            nn.ReLU(),
-            nn.Flatten(),
-            nn.LazyLinear(256),  # Adjust size calculation based on your architecture
-            nn.ReLU()
-        )
-
-        # Fusion and Decision Making
-        self.fusion = nn.LazyLinear(5)  # Output shape (22, 5)
-        
-        
-    def normalize_visual_input(self, tensor):
-        # Scale images to [0, 1]
-        return tensor / 255.0
-
-    def forward(self, audio_input, visual_input):
-        # Assuming audio_input is already on the correct device
-        device = audio_input.device
-        visual_input = visual_input.to(device)  # Ensure same device
-        # display_tensor_info(visual_input, 'PreNormalized visual input')
-
-        # Normalize and debug print
-        visual_input = self.normalize_visual_input(visual_input)
-        # display_tensor_info(visual_input, 'Normalized visual input')
-        # breakpoint()
-        # Prepare inputs for ViT
-        # with torch.no_grad():
-        inputs = self.feature_extractor(images=visual_input, return_tensors="pt").to(device)
-        visual_outputs = self.visual_model(**inputs)
-        visual_features = visual_outputs.last_hidden_state[:, 0, :]
-        visual_features = self.visual_projection(visual_features)
-
-        # Process audio features
-        audio_features = self.audio_model(audio_input)
-
-        # Fuse and softmax
-        combined_features = torch.cat((audio_features, visual_features), dim=-1)
         output = self.fusion(combined_features)
         output = F.softmax(output, dim=1)
         return output
@@ -183,10 +120,10 @@ def callNN(sample_visual_frames, audio_features, labels,test_dataset,val_dataset
     dataset_val = DataLoaderFrameLabeled(frames = val_dataset[0], audio = val_dataset[1], labels = val_dataset[2])
     
     # Init the model
-    avm = loadModel(AudioVisualModel(), os.path.join(os.getcwd(), 'model.pth'))
+    avm = loadModel(AudioVisualModelXception(), os.path.join(os.getcwd(), 'model.pth'))
     if(avm == None):
         print("Creating a new model")
-        avm = AudioVisualModel()
+        avm = AudioVisualModelXception()
     avm = avm.to(device)
 
     # Define the loss function and optimizer
