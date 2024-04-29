@@ -1,16 +1,16 @@
 import csv
 import numpy as np
 
-def getAnnotations(annotation_path, videoID):
+
+def get_annotations(annotation_fp, video_id):
     annotations = []
-    with open(annotation_path, 'r') as file:
+    with open(annotation_fp, 'r') as file:
         reader = csv.reader(file, delimiter='\t')
-        
+
         for row in reader:
-            if row[0] == videoID:
+            if row[0] == video_id:
                 annotations.append(row[2].strip().split(','))
-                
-    "annotations = 20 annotations for each frame"
+
     # shape of annotations: (20, frames)
     # get mean for each frame
     # and get each 1 each 15 frames
@@ -22,6 +22,5 @@ def getAnnotations(annotation_path, videoID):
             mean_annotations.append(np.mean(ann))
         count+=1
     mean_annotations = np.array(mean_annotations)
-    # TODO : may use multi label later for each frame
-    
+
     return mean_annotations

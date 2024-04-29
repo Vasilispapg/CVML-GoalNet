@@ -4,20 +4,12 @@ import librosa
 import numpy as np
 from scipy.interpolate import interp1d
 
-def extract_audio_from_video(video_path, audio_output_path):
-    """
-    The function `extract_audio_from_video` extracts the audio from a video file and saves it to a
-    specified output path.
-    
-    :param video_path: The `video_path` parameter is the file path to the video from which you want to
-    extract the audio. This should be a valid path to the video file on your system
-    :param audio_output_path: The `audio_output_path` parameter is the file path where you want to save
-    the extracted audio from the video. This should include the file name and extension of the audio
-    file you want to create
-    """
-    video = VideoFileClip(video_path)
+
+
+def export_audio_from_video(audio_fp, video_fp):
+    video = VideoFileClip(video_fp)
     audio = video.audio
-    audio.write_audiofile(audio_output_path)
+    audio.write_audiofile(audio_fp)
     video.close()
     
     
