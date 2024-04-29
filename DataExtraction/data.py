@@ -1,5 +1,5 @@
 from frames import extract_frames
-from audio import extract_audio_from_video, extract_audio_features_for_each_frame
+from audio import extract_audio_from_video,extract_audio_features
 from save import saveData
 from getData import getData
 from frames import extract_frames
@@ -21,7 +21,7 @@ def extractData(video_path, flag_to_extract):
         extract_audio_from_video(video_path, audio_output_path) 
 
         # Extract audio features
-        audio_features = extract_audio_features_for_each_frame(audio_output_path=audio_output_path,num_frames=len(frames))
+        audio_features = extract_audio_features(audio_fp=audio_output_path,n_frames=len(frames))
         return_data.append(['audio',audio_features])
     else:
         return_data.append(None)
