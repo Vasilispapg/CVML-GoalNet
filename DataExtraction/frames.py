@@ -1,5 +1,4 @@
 import cv2
-import numpy as np
 
 def extract_frames(video_path, frame_rate=15):
     video = cv2.VideoCapture(video_path)

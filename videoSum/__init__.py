@@ -1,9 +1,7 @@
 
 import sys
-sys.path.append('yolo')
 sys.path.append('DataExtraction')
 sys.path.append('Evaluation')
-sys.path.append('yolo')
 sys.path.append('videoSum')
 sys.path.append('knapsack')
 import os

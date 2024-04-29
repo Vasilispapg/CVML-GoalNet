@@ -71,13 +71,13 @@ def saveResults(videoID,f_score_max,f_score_avg):
     results={}
     if(not os.path.exists('results.json')):
         with open('results.json', 'w') as file:
-            json.dump(results, file)
+            json.dump(results, file,indent=4)
     with open('results.json','r') as file:
         results=json.load(file)
         
     results[videoID]={'f_score_max':f_score_max,'f_score_avg':f_score_avg}
     with open('results.json', 'w') as file:
-        json.dump(results, file)
+        json.dump(results, file,indent=4)
     
 def evaluation_method(ground_truth_path,summary_indices,videoID):
     
