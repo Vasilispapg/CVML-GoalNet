@@ -13,19 +13,30 @@ import h5py
 
 class dataloader(Dataset):
 
-    def __init__(self, frames: list[torch.tensor], audios: list[torch.tensor], labels: list[torch.tensor] = None, device: str = 'cpu'):
+    def __init__(self, fps: list[str], frames: list[torch.tensor], full_frames: list[np.ndarray], audios: list[torch.tensor], labels: list[torch.tensor] = None, device: str = 'cpu'):
         '''
-            frames. Dimensions (N, C, H, W).
-            audios. Dimensions (N, K, n_mfcc, B).
-            labels. Dimensions (N,).
+            Description
+                Video summarization dataset. Each batch is one individual video. Each instance is one frame belonging to the mentioned video-batches.
 
-            N is the number of frames; B is the number of timestamps per bin of the MFCC algorithm; C is the number of visual channels.
+            Parameters
+                fps. File path of a given instance video.
+                frames. For a given video index i, frame[i] has shape (N_i, C, H, W) and each frame is preprocessed.
+                full_frames. For a given video index i, frame[i] has shape (N_i, C, H_i, W_i) containing exactly all raw frames.
+                audios. For a given video index i, audios[i] has shape (N_i, K, n_mfcc, B).
+                labels. For a given video index i, labels has shape (N_i,).
+                device. Processing unit identifier, responsible for tensor operations.
+
+                N is the number of frames; B is the number of timestamps per bin of the MFCC algorithm; C is the number of visual channels.
         '''
 
+        self.fps = fps
+        self.video_ids = [video_fp.split('/')[-1].split('.')[0] for video_fp in self.fps]
         self.frames = [torch.tensor(frames_, dtype = torch.float32, device = device) for frames_ in frames]
+        self.full_frames = full_frames
+        self.full_n_frames = [len(self.full_frames[video_idx]) for video_idx in range(len(self.full_frames))]
         self.audios = [torch.tensor(audios_, dtype = torch.float32, device = device) for audios_ in audios]
         if labels == None:
-            self.labels = None
+            self.labels = [None for _ in len(range(frames))]
             assert len(self.frames) == len(self.audios), 'E: Inconsistency in data loader definition'
         else:
             self.labels = [torch.tensor(labels_, dtype = torch.float32, device = device) for labels_ in labels]
@@ -37,13 +48,10 @@ class dataloader(Dataset):
         return self.N
 
     def __getitem__(self, video_idx):
-        if self.labels is None:
-            return self.frames[video_idx], self.audios[video_idx], None
-        else:
-            return self.frames[video_idx], self.audios[video_idx], self.labels[video_idx]
 
-def cnn0():
-    return Cnn0()
+        self.full_n_frames_ = self.full_n_frames[video_idx]
+
+        return self.video_ids[video_idx], self.frames[video_idx], self.full_frames[video_idx], self.audios[video_idx], self.labels[video_idx]
 
 class SeparableConv2d(nn.Module):
     def __init__(self,in_channels,out_channels,kernel_size=1,stride=1,padding=0,dilation=1,bias=False):
@@ -109,12 +117,15 @@ class Cnn0(nn.Module):
         return x
 
 class audio_visual_model(nn.Module):
-    def __init__(self):
+
+    def __init__(self, sound_included):
+
         super(audio_visual_model, self).__init__()
-        # Visual Branch (Xception)
-        # self.visual_model = xception(num_classes=1000)
-        self.visual_model = cnn0()
-        self.visual_model.fc = nn.Identity()  # Adapt final layer based on Xception architecture
+
+        self.sound_included = sound_included
+
+        self.visual_model = Cnn0()
+
         self.conv1 = nn.Conv1d(in_channels=1, out_channels=16, kernel_size=3, stride=1, padding=1)
 
         # Audio Branch (Simple CNN for MFCC); the sliding window covers all the Mel coefficients, for some fixed time units totalling <kernel_size>, and slides across the time unit axis; therefore for a given sliding window, the output considers all Mel coefficients for these particular fixed time units and returns one value
@@ -133,11 +144,9 @@ class audio_visual_model(nn.Module):
             nn.Sigmoid()
         )
 
-    def forward(self, audio_input, visual_input): # audio_input: MFCC features, visual_input: Frames
-        # display_tensor_info(tnsr = visual_input, var_name = 'visual_input')
-        # AUDIO FEATURES
-        audio_features = self.audio_model(audio_input)
-        # VISUAL FEATURES
+    def forward(self, audio_input, visual_input):
+
+
         with torch.no_grad():
             features = self.visual_model(visual_input)  # Extract features using Xception
         visual_features = nn.ReLU(inplace=True)(features)
@@ -145,7 +154,11 @@ class audio_visual_model(nn.Module):
         visual_features = visual_features.view(visual_features.size(0), -1)
         visual_features = nn.LazyLinear(512).to(visual_features.device)(visual_features)
 
-        combined_features = torch.cat((audio_features, visual_features), axis = -1)
+        if self.sound_included:
+            audio_features = self.audio_model(audio_input)
+            combined_features = torch.cat((audio_features, visual_features), axis = -1)
+        else:
+            combined_features = visual_features
 
         output = 4 * self.fusion(combined_features) + 1
         return output
@@ -398,6 +411,93 @@ def export_video(frames, output_path, frame_rate=30):
 
     out.release()
 
+def load_mat_file(file_path,videoID):
+    """
+    Load a .mat file and return its contents.
 
+    :param file_path: Path to the .mat file.
+    :return: Contents of the .mat file.
+    """
+    with h5py.File(file_path, 'r') as file:
+        user_anno_refs=file['tvsum50']['user_anno'][:] # type: ignore
+        video_refs=file['tvsum50']['video'][:] # type: ignore
 
+        decoded_videos = decode_titles(video_refs,file)
+    
+        annotations = []        
+        # Get the index from decoded video list to find the annotation for the video
+        index = [i for i, x in enumerate(decoded_videos) if x.lower() in videoID.lower()][0]
+        
+        # Iterate over each reference
+        for ref in user_anno_refs:
+            # Dereference each HDF5 object reference
+            ref_data = file[ref[0]]
 
+            # Convert to NumPy array and add to the annotations list
+            annotations.append(np.array(ref_data))
+            
+        return annotations[index]
+
+def evaluate_summary(predicted_summary, user_summary, eval_method='avg'):
+    max_len = max(len(predicted_summary), user_summary.shape[1])
+    S = np.zeros(max_len, dtype=int)
+    G = np.zeros(max_len, dtype=int)
+    S[:len(predicted_summary)] = predicted_summary
+
+    f_scores = []
+    for user in range(user_summary.shape[0]):
+        G[:user_summary.shape[1]] = user_summary[user]
+        overlapped = S & G
+        
+        precision = sum(overlapped) / sum(S) if sum(S) != 0 else 0
+        recall = sum(overlapped) / sum(G) if sum(G) != 0 else 0
+        f_score = 2 * precision * recall / (precision + recall) if (precision + recall) != 0 else 0
+        f_scores.append(f_score * 100)  # multiplied by 100 for percentage
+
+    if eval_method == 'max':
+        return max(f_scores)
+    else:  # 'avg'
+        return sum(f_scores) / len(f_scores)
+
+def evaluation_method(ground_truth_path, summary_indices,video_id):
+
+    # Get the ground_truth
+    ground_truth = np.array(load_mat_file(ground_truth_path, video_id))
+
+    f_score_max = evaluate_summary(summary_indices, ground_truth, 'max')
+    f_score_avg = evaluate_summary(summary_indices, ground_truth)
+
+    return f_score_avg, f_score_max
+
+def postprocessing(video_id, h5_file_path, mat_file_path, batch_predictions, skip_frames, full_n_frames, full_frames):
+
+    batch_predictions = torch.round(batch_predictions[:, 0]).type(torch.int8).tolist()
+
+    expanded_batch_predictions = expand_array(arr = batch_predictions, expansion_rate = skip_frames, length = full_n_frames)
+
+    video_data_h5 = get_video_data_from_h5(h5_file_path)
+    video_data_mat = get_video_data_from_mat(mat_file_path)
+
+    video_id_map = {}
+    for video_mat in video_data_mat:
+        for video_h5 in video_data_h5:
+            if video_mat[1] == video_h5[1] + 1:
+                video_id_map[video_mat[0]] = video_h5[0]
+
+    with h5py.File(h5_file_path, 'r') as file:
+        clip_intervals = file[video_id_map[video_id]]['change_points'][:]
+
+    clip_importances, clip_lengths = get_clip_information(clip_intervals = clip_intervals, importances = expanded_batch_predictions)
+
+    max_knapsack_capacity = int(0.15 * full_n_frames)
+
+    summarization_clip_interval_indices = knapsack(values = clip_importances, weights = clip_lengths, capacity = max_knapsack_capacity)
+    summarization_clip_intervals = [clip_intervals[summarization_clip_interval_index] for summarization_clip_interval_index in summarization_clip_interval_indices]
+    summarized_video = np.concatenate([full_frames[summarization_clip_interval[0]:summarization_clip_interval[1]] for summarization_clip_interval in summarization_clip_intervals], axis=0)
+
+    summarized_video_frame_indices = np.zeros(shape = (full_n_frames,), dtype = np.uint8)
+    for summarization_clip_interval in summarization_clip_intervals:
+        for frame_idx in range(summarization_clip_interval[0], summarization_clip_interval[1] + 1):
+            summarized_video_frame_indices[frame_idx] = 1
+
+    return summarized_video, summarized_video_frame_indices
