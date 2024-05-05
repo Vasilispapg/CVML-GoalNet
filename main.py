@@ -24,7 +24,7 @@ class color:
     UNDERLINE = '\033[4m'
     END = '\033[0m'
 
-def train_importance_model(sound_included, load_ckp):
+def train_importance_model(audio_included, load_ckp):
 
     def get_train_f_scores():
 
@@ -113,7 +113,7 @@ def train_importance_model(sound_included, load_ckp):
     print("Number of train videos: %d"%(len(train_dataset)))
     print("Number of val videos: %d"%(len(val_dataset)))
 
-    frame_importance_model = audio_visual_model(sound_included = sound_included)
+    frame_importance_model = audio_visual_model(audio_included = audio_included)
     if load_ckp:
         frame_importance_model.load_state_dict(torch.load(f = ckp_frame_importance_model_fp))
 
@@ -254,7 +254,7 @@ def train_importance_model(sound_included, load_ckp):
     print("Est. train loss: %.4f - Est. train F-score Avg: %.4f - Est. train F-score Max: %.4f - Val loss: %.4f - Val F-score Avg: %.4f - Val F-score Max: %.4f - Δt: %.1fs"%(opt_est_train_loss, opt_est_train_f_score_avg, opt_est_train_f_score_max, opt_val_loss, opt_val_f_score_avg, opt_val_f_score_max, t1_train - t0_train))
     print("\nOperation completed")
 
-def infer(video_fp: str):
+def infer(video_fp: str, audio_included: bool):
 
     opt_frame_importance_model = "./models/opt_frame_importance_model.pt"
     audio_fp = './tmp/audio.wav'
@@ -274,7 +274,7 @@ def infer(video_fp: str):
 
     data = dataloader(fps = [video_fp], frames = [visual_frames_tensor], full_frames = [full_val_frames], audios = [audio_features_tensor], labels = None)
 
-    frame_importance_model = audio_visual_model()
+    frame_importance_model = audio_visual_model(audio_included = audio_included)
     frame_importance_model.load_state_dict(torch.load(f = opt_frame_importance_model))
 
     video_id, val_frames, full_val_frames, val_audios, _ = next(iter(data))
@@ -317,10 +317,12 @@ if __name__ == '__main__':
         assert "--train" in sys.argv[1] and sys.argv[2] == "--checkpoint", "E: Invalid prompt arguments"
         load_ckp = True
 
+    infer_video_fp = 'ydata-tvsum50-v1_1/video/-esJrBWj2d8.mp4'
     if len(sys.argv) == 2 and sys.argv[1] == '--train':
-        train_importance_model(sound_included = True, load_ckp = load_ckp)
-    elif len(sys.argv) == 2 and sys.argv[1] == '--train-no-sound':
-        train_importance_model(sound_included = False, load_ckp = load_ckp)
+        train_importance_model(audio_included = True, load_ckp = load_ckp)
+    elif len(sys.argv) == 2 and sys.argv[1] == '--train-no-audio':
+        train_importance_model(audio_included = False, load_ckp = load_ckp)
     elif len(sys.argv) == 2 and sys.argv[1] == '--infer':
-        video_fp = 'ydata-tvsum50-v1_1/video/-esJrBWj2d8.mp4'
-        infer(video_fp = video_fp)
+        infer(video_fp = infer_video_fp, audio_included = True)
+    elif len(sys.argv) == 2 and sys.argv[1] == '--infer-no-audio':
+        infer(video_fp = infer_video_fp, audio_included = False)

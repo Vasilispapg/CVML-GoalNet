@@ -35,8 +35,8 @@ class dataloader(Dataset):
         self.full_frames = full_frames
         self.full_n_frames = [len(self.full_frames[video_idx]) for video_idx in range(len(self.full_frames))]
         self.audios = [torch.tensor(audios_, dtype = torch.float32, device = device) for audios_ in audios]
-        if labels == None:
-            self.labels = [None for _ in len(range(frames))]
+        if labels is None:
+            self.labels = [None for _ in range(len(frames))]
             assert len(self.frames) == len(self.audios), 'E: Inconsistency in data loader definition'
         else:
             self.labels = [torch.tensor(labels_, dtype = torch.float32, device = device) for labels_ in labels]
@@ -118,11 +118,11 @@ class Cnn0(nn.Module):
 
 class audio_visual_model(nn.Module):
 
-    def __init__(self, sound_included):
+    def __init__(self, audio_included):
 
         super(audio_visual_model, self).__init__()
 
-        self.sound_included = sound_included
+        self.audio_included = audio_included
 
         self.visual_model = Cnn0()
 
@@ -154,7 +154,7 @@ class audio_visual_model(nn.Module):
         visual_features = visual_features.view(visual_features.size(0), -1)
         visual_features = nn.LazyLinear(512).to(visual_features.device)(visual_features)
 
-        if self.sound_included:
+        if self.audio_included:
             audio_features = self.audio_model(audio_input)
             combined_features = torch.cat((audio_features, visual_features), axis = -1)
         else:
