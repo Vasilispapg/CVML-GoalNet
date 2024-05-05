@@ -7,9 +7,8 @@ import torch.optim as optim
 from time import time
 import torch.nn as nn
 import numpy as np
-from copy import deepcopy
 
-from utils import get_annotations, extract_condensed_frame_tensor, export_audio_from_video, extract_audio_features, dataloader, audio_visual_model, expand_array, get_video_data_from_h5, get_video_data_from_mat, get_clip_information, knapsack, export_video, get_frame_tensor, evaluation_method, postprocessing
+from utils import get_annotations, extract_condensed_frame_tensor, export_audio_from_video, extract_audio_features, dataloader, audio_visual_model, export_video, get_frame_tensor, evaluation_method, postprocessing
 from visualization import generate_metric_plots
 
 class color:
@@ -37,7 +36,7 @@ def train_importance_model(audio_included, load_ckp):
             batch_predictions = batch_predictions,
             skip_frames = skip_frames,
             full_n_frames = full_n_batch_frames,
-            full_frames = full_batch_frames
+            full_frames = None
         )
 
         # Summarization evaluation
@@ -56,7 +55,7 @@ def train_importance_model(audio_included, load_ckp):
             batch_predictions = val_predictions,
             skip_frames = skip_frames,
             full_n_frames = full_n_val_frames,
-            full_frames = full_val_frames
+            full_frames = None
         )
 
         # Summarization evaluation
@@ -67,8 +66,12 @@ def train_importance_model(audio_included, load_ckp):
     ## ! Initialization: Begin
 
     # Paths
-    opt_frame_importance_model = "./models/opt_frame_importance_model.pt"
-    ckp_frame_importance_model_fp = "./models/ckp_frame_importance_model.pt"
+    if audio_included:
+        opt_frame_importance_model_fp = "./models/opt_frame_importance_model.pt"
+        ckp_frame_importance_model_fp = "./models/ckp_frame_importance_model.pt"
+    else:
+        opt_frame_importance_model_fp = "./models/opt_frame_importance_model_no_audio.pt"
+        ckp_frame_importance_model_fp = "./models/ckp_frame_importance_model_no_audio.pt"
     annotation_fp = 'ydata-tvsum50-v1_1/data/ydata-tvsum50-anno.tsv'
     audio_fp = './tmp/audio.wav'
     h5_file_path = 'ydata-tvsum50-v1_1/ground_truth/eccv16_dataset_tvsum_google_pool5.h5'
@@ -146,7 +149,7 @@ def train_importance_model(audio_included, load_ckp):
             train_f_scores_max.append(batch_f_score_max)
         torch.cuda.empty_cache()
 
-    video_id, val_frames, full_val_frames, val_audios, val_labels = next(iter(val_dataset))
+    video_id, val_frames, val_audios, val_labels = next(iter(val_dataset))
 
     print("Validation video: %s"%(video_id))
 
@@ -159,6 +162,14 @@ def train_importance_model(audio_included, load_ckp):
     train_est_loss = sum(train_losses) / len(train_losses)
     est_train_f_score_avg = sum(train_f_scores_avg) / len(train_f_scores_avg)
     est_train_f_score_max = sum(train_f_scores_max) / len(train_f_scores_max)
+
+    opt_val_loss = val_loss
+    opt_est_train_loss = train_est_loss
+    opt_epoch = -1
+    opt_est_train_f_score_avg = est_train_f_score_avg
+    opt_est_train_f_score_max = est_train_f_score_max
+    opt_val_f_score_avg = val_f_score_avg
+    opt_val_f_score_max = val_f_score_max
 
     est_train_losses.append(train_est_loss)
     est_train_f_scores_avg.append(est_train_f_score_avg)
@@ -174,7 +185,6 @@ def train_importance_model(audio_included, load_ckp):
 
     # Training
     print("\n[Training states]\n")
-    opt_val_loss = deepcopy(val_loss)
     opt_epoch = -1
     t0_train = time()
     for epoch in range(num_epochs):
@@ -202,7 +212,7 @@ def train_importance_model(audio_included, load_ckp):
             train_f_scores_max.append(batch_f_score_max)
 
             # Val scores
-            video_id, val_frames, full_val_frames, val_audios, val_labels = next(iter(val_dataset))
+            video_id, val_frames, val_audios, val_labels = next(iter(val_dataset))
             with torch.no_grad():
                 val_predictions = frame_importance_model(val_audios, val_frames)
                 val_loss = criterion(val_predictions, val_labels).item()
@@ -236,7 +246,7 @@ def train_importance_model(audio_included, load_ckp):
             opt_est_train_f_score_max = est_train_f_score_max
             opt_val_f_score_avg = val_f_score_avg
             opt_val_f_score_max = val_f_score_max
-            torch.save(obj = frame_importance_model.state_dict(), f = opt_frame_importance_model)
+            torch.save(obj = frame_importance_model.state_dict(), f = opt_frame_importance_model_fp)
         else:
             print("Val ΔL " + color.RED + "↑ %.4f"%(abs(val_loss - opt_val_loss)) + color.END)
 
@@ -256,7 +266,11 @@ def train_importance_model(audio_included, load_ckp):
 
 def infer(video_fp: str, audio_included: bool):
 
-    opt_frame_importance_model = "./models/opt_frame_importance_model.pt"
+    # Paths
+    if audio_included:
+        opt_frame_importance_model_fp = "./models/opt_frame_importance_model.pt"
+    else:
+        opt_frame_importance_model_fp = "./models/opt_frame_importance_model_no_audio.pt"
     audio_fp = './tmp/audio.wav'
     h5_file_path = 'ydata-tvsum50-v1_1/ground_truth/eccv16_dataset_tvsum_google_pool5.h5'
     mat_file_path = 'ydata-tvsum50-v1_1/ground_truth/ydata-tvsum50.mat'
@@ -276,7 +290,7 @@ def infer(video_fp: str, audio_included: bool):
     data = dataloader(fps = [video_fp], frames = [visual_frames_tensor], full_n_frames = [full_n_val_frames], audios = [audio_features_tensor], labels = None)
 
     frame_importance_model = audio_visual_model(audio_included = audio_included)
-    frame_importance_model.load_state_dict(torch.load(f = opt_frame_importance_model))
+    frame_importance_model.load_state_dict(torch.load(f = opt_frame_importance_model_fp))
 
     video_id, val_frames, val_audios, _ = next(iter(data))
     full_val_frames = get_frame_tensor(fp = video_fp)

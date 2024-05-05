@@ -484,7 +484,7 @@ def evaluation_method(ground_truth_path, summary_indices,video_id):
 
     return f_score_avg, f_score_max
 
-def postprocessing(video_id, h5_file_path, mat_file_path, batch_predictions, skip_frames, full_n_frames, full_frames):
+def postprocessing(video_id, h5_file_path, mat_file_path, batch_predictions, skip_frames, full_n_frames, full_frames = None):
 
     batch_predictions = torch.round(batch_predictions[:, 0]).type(torch.int8).tolist()
 
@@ -508,7 +508,10 @@ def postprocessing(video_id, h5_file_path, mat_file_path, batch_predictions, ski
 
     summarization_clip_interval_indices = knapsack(values = clip_importances, weights = clip_lengths, capacity = max_knapsack_capacity)
     summarization_clip_intervals = [clip_intervals[summarization_clip_interval_index] for summarization_clip_interval_index in summarization_clip_interval_indices]
-    summarized_video = np.concatenate([full_frames[summarization_clip_interval[0]:summarization_clip_interval[1]] for summarization_clip_interval in summarization_clip_intervals], axis=0)
+    if full_frames is not None:
+        summarized_video = np.concatenate([full_frames[summarization_clip_interval[0]:summarization_clip_interval[1]] for summarization_clip_interval in summarization_clip_intervals], axis=0)
+    else:
+        summarized_video = None
 
     summarized_video_frame_indices = np.zeros(shape = (full_n_frames,), dtype = np.uint8)
     for summarization_clip_interval in summarization_clip_intervals:
