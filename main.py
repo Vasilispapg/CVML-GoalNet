@@ -76,11 +76,11 @@ def train_importance_model(audio_included, load_ckp):
     video_fps = sorted(glob.glob('./ydata-tvsum50-v1_1/video/*.mp4'), reverse = False)
 
     # Hyperparameters (preprocessing)
-    videos_limitation = 2
+    videos_limitation = -1
     skip_frames = 15
 
     # Hyperparameters (training process - frame importance model)
-    num_epochs = 3
+    num_epochs = 20
     lr = 0.00008
 
     ## ! Initialization: End
@@ -263,7 +263,7 @@ def infer(video_fp: str, audio_included: bool):
 
     skip_frames = 15
 
-    print("VIDEO:", video_fp)
+    print("Input video:\n", video_fp)
 
     visual_frames_tensor = torch.tensor(extract_condensed_frame_tensor(video_fp, skip_frames = skip_frames), dtype = torch.float32)
     full_val_frames = get_frame_tensor(video_fp)
@@ -301,8 +301,8 @@ def infer(video_fp: str, audio_included: bool):
     # print('F-score Avg: %.4f'%(f_score_avg))
     # print('F-score Max: %.4f'%(f_score_max))
 
-    print("Exporting video: %s"%(video_id))
-    export_video(frames = summarized_video, output_path = "./tmp/summarized_video.mp4", frame_rate = 30)
+    export_video(frames = summarized_video, output_path = "./tmp/%s.mp4"%(data.title), frame_rate = 30)
+    print("\n[Exported video details]\n\nID: %s\nTitle: %s"%(video_id, data.title))
 
 
 if __name__ == '__main__':

@@ -9,6 +9,7 @@ from moviepy.editor import VideoFileClip
 import numpy as np
 import librosa
 import h5py
+import pandas as pd
 
 
 class dataloader(Dataset):
@@ -42,13 +43,29 @@ class dataloader(Dataset):
             self.labels = [torch.tensor(labels_, dtype = torch.float32, device = device) for labels_ in labels]
             assert len(self.frames) == len(self.audios) == len(self.labels), 'E: Inconsistency in data loader definition'
 
+        self.titles = self.get_titles(self.video_ids)
+
         self.N = len(self.frames)
+
+    def get_titles(self, video_ids):
+
+        df = pd.read_csv("./ydata-tvsum50-v1_1/data/ydata-tvsum50-info.tsv", sep = "\t")
+        titles_unordered = dict()
+        for unordered_idx, row in df.iterrows():
+            titles_unordered[row["video_id"]] = row["title"]
+
+        titles_ordered = []
+        for video_id in video_ids:
+            titles_ordered.append(titles_unordered[video_id])
+
+        return titles_ordered
 
     def __len__(self):
         return self.N
 
     def __getitem__(self, video_idx):
 
+        self.title = self.titles[video_idx]
         self.full_n_frames_ = self.full_n_frames[video_idx]
 
         return self.video_ids[video_idx], self.frames[video_idx], self.full_frames[video_idx], self.audios[video_idx], self.labels[video_idx]
