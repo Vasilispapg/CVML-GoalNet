@@ -80,7 +80,7 @@ def train_importance_model(audio_included, load_ckp):
     skip_frames = 15
 
     # Hyperparameters (training process - frame importance model)
-    num_epochs = 20
+    num_epochs = 20 # 100
     lr = 0.00008
 
     ## ! Initialization: End
@@ -90,24 +90,24 @@ def train_importance_model(audio_included, load_ckp):
     ground_truths_trimmed = []
     ground_truths_full = []
     frames = []
-    full_frames = []
     audios = []
+    full_n_frames = []
     for video_fp in video_fps:
         video_id = video_fp.split('/')[-1].split('.')[0]
         print("Extracting content from %s"%(video_id))
         ground_truth_trimmed, ground_truth_full = get_annotations(annotation_fp = annotation_fp, video_id = video_id, skip_frames = skip_frames)
         ground_truths_trimmed.append(ground_truth_trimmed)
         ground_truths_full.append(ground_truth_full)
-        visual_frames_tensor = extract_condensed_frame_tensor(video_fp, skip_frames = skip_frames)
+        visual_frames_tensor, full_n_frames_ = extract_condensed_frame_tensor(video_fp, skip_frames = skip_frames)
         N = len(visual_frames_tensor)
         export_audio_from_video(audio_fp = audio_fp, video_fp = video_fp)
         audio_features_tensor = extract_audio_features(audio_fp = audio_fp, n_frames = N)
+        full_n_frames.append(full_n_frames_)
         frames.append(visual_frames_tensor)
-        full_frames.append(get_frame_tensor(video_fp))
         audios.append(audio_features_tensor)
 
-    val_dataset = dataloader(fps = [video_fps.pop()], frames = [frames.pop()], full_frames = [full_frames.pop()], audios = [audios.pop()], labels = [ground_truths_trimmed.pop()])
-    train_dataset = dataloader(fps = video_fps, frames = frames, full_frames = full_frames, audios = audios, labels = ground_truths_trimmed)
+    val_dataset = dataloader(fps = [video_fps.pop()], frames = [frames.pop()], full_n_frames = [full_n_frames.pop()], audios = [audios.pop()], labels = [ground_truths_trimmed.pop()])
+    train_dataset = dataloader(fps = video_fps, frames = frames, full_n_frames = full_n_frames, audios = audios, labels = ground_truths_trimmed)
     del frames, audios, ground_truths_trimmed
 
     print("Number of train videos: %d"%(len(train_dataset)))
@@ -135,13 +135,13 @@ def train_importance_model(audio_included, load_ckp):
     train_losses = []
     train_f_scores_avg = []
     train_f_scores_max = []
-    for video_idx, (video_id, batch_frames, full_batch_frames, batch_audios, batch_labels) in enumerate(train_dataset):
+    for video_idx, (video_id, batch_frames, batch_audios, batch_labels) in enumerate(train_dataset):
         with torch.no_grad():
             batch_predictions = frame_importance_model(batch_audios, batch_frames)
             train_losses.append(criterion(batch_predictions, batch_labels).item())
             full_n_batch_frames = train_dataset.full_n_frames_
             batch_f_score_avg, batch_f_score_max = get_train_f_scores()
-            print("Video: %d/%d - Batch size: %d - Batch loss: %.4f - Batch F-score Avg: %.4f - Batch F-score Max: %.4f"%(video_idx, len(train_dataset)-1, full_n_batch_frames, train_losses[-1], batch_f_score_avg, batch_f_score_max))
+            print("Video: %d/%d\nBatch Set - Size: %d - Loss: %.4f - F-score Avg: %.4f - F-score Max: %.4f"%(video_idx, len(train_dataset)-1, full_n_batch_frames, train_losses[-1], batch_f_score_avg, batch_f_score_max))
             train_f_scores_avg.append(batch_f_score_avg)
             train_f_scores_max.append(batch_f_score_max)
         torch.cuda.empty_cache()
@@ -168,13 +168,13 @@ def train_importance_model(audio_included, load_ckp):
     val_f_scores_max.append(val_f_score_max)
 
     t1 = time()
-    print("Est. train loss: %.4f - Est. train F-score Avg: %.4f - Est. train F-score Max: %.4f - Val loss: %.4f - Val F-score Avg: %.4f - Val F-score Max: %.4f - Δt: %.1fs"%(train_est_loss, est_train_f_score_avg, est_train_f_score_max, val_loss, val_f_score_avg, val_f_score_max, t1-t0))
+    print("Train Set - Est. loss: %.4f - Est. F-score Avg: %.4f - Est. F-score Max: %.4f\nVal Set - Loss: %.4f - F-score Avg: %.4f - F-score Max: %.4f\nΔt: %.1fs"%(train_est_loss, est_train_f_score_avg, est_train_f_score_max, val_loss, val_f_score_avg, val_f_score_max, t1-t0))
 
     # ! Evaluation of model prior to training: End
 
     # Training
     print("\n[Training states]\n")
-    opt_val_loss = np.infty
+    opt_val_loss = deepcopy(val_loss)
     opt_epoch = -1
     t0_train = time()
     for epoch in range(num_epochs):
@@ -183,7 +183,7 @@ def train_importance_model(audio_included, load_ckp):
         train_f_scores_max = []
         t0_epoch = time()
         print("Epoch: %d/%d"%(epoch, num_epochs-1))
-        for video_idx, (video_id, batch_frames, batch_full_frames, batch_audios, batch_labels) in enumerate(train_dataset):
+        for video_idx, (video_id, batch_frames, batch_audios, batch_labels) in enumerate(train_dataset):
 
             t0_step = time()
 
@@ -213,7 +213,7 @@ def train_importance_model(audio_included, load_ckp):
 
             t1_step = time()
 
-            print("Video: %d/%d - Batch size: %d - Batch loss: %.4f - Batch F-score Avg: %.4f - Batch F-score Max: %.4f - Val loss: %.4f - Val F-score Avg: %.4f - Val F-score Max: %.4f - Δt: %.1fs"%(video_idx, len(train_dataset)-1, full_n_batch_frames, batch_losses[-1], batch_f_score_avg, batch_f_score_max, val_loss, val_f_score_avg, val_f_score_max, t1_step-t0_step))
+            print("Video: %d/%d\nBatch Set - Size: %d - Loss: %.4f - F-score Avg: %.4f - F-score Max: %.4f\nVal Set - Loss: %.4f - F-score Avg: %.4f - F-score Max: %.4f\nΔt: %.1fs"%(video_idx, len(train_dataset)-1, full_n_batch_frames, batch_losses[-1], batch_f_score_avg, batch_f_score_max, val_loss, val_f_score_avg, val_f_score_max, t1_step-t0_step))
         train_est_loss = sum(batch_losses) / len(batch_losses)
         est_train_f_score_avg = sum(train_f_scores_avg) / len(train_f_scores_avg)
         est_train_f_score_max = sum(train_f_scores_max) / len(train_f_scores_max)
@@ -225,8 +225,10 @@ def train_importance_model(audio_included, load_ckp):
         val_f_scores_avg.append(val_f_score_avg)
         val_f_scores_max.append(val_f_score_max)
 
+        print("\n" + color.BOLD + "Overall epoch state" + color.END + "\n")
+
         if val_loss < opt_val_loss:
-            print(color.BOLD + "ΔL " + color.GREEN + "↓ %.4f"%(abs(val_loss - opt_val_loss)) + color.END)
+            print("Val ΔL " + color.GREEN + "↓ %.4f"%(abs(val_loss - opt_val_loss)) + color.END)
             opt_val_loss = val_loss
             opt_est_train_loss = train_est_loss
             opt_epoch = epoch
@@ -236,22 +238,20 @@ def train_importance_model(audio_included, load_ckp):
             opt_val_f_score_max = val_f_score_max
             torch.save(obj = frame_importance_model.state_dict(), f = opt_frame_importance_model)
         else:
-            print(color.BOLD + "ΔL " + color.RED + "↑ %.4f"%(abs(val_loss - opt_val_loss)) + color.END)
+            print("Val ΔL " + color.RED + "↑ %.4f"%(abs(val_loss - opt_val_loss)) + color.END)
 
         torch.save(obj = frame_importance_model.state_dict(), f = ckp_frame_importance_model_fp)
         generate_metric_plots(opt_val_loss, est_train_losses, est_train_f_scores_avg, est_train_f_scores_max, val_losses, val_f_scores_avg, val_f_scores_max)
 
         t1_epoch = time()
+        print("Train Set - Est. loss: %.4f - Est. F-score Avg: %.4f - Est. F-score Max: %.4f\nVal Set - Loss: %.4f - F-score Avg: %.4f - F-score Max: %.4f\nΔt: %.1fs"%(train_est_loss, est_train_f_score_avg, est_train_f_score_max, val_loss, val_f_score_avg, val_f_score_max, t1_epoch - t0_epoch))
         print()
-        print("Overall epoch state")
-        print("Est. train loss: %.4f - Est. train F-score Avg: %.4f - Est. train F-score Max: %.4f - Val loss: %.4f - Val F-score Avg: %.4f - Val F-score Max: %.4f - Δt: %.1fs"%(train_est_loss, est_train_f_score_avg, est_train_f_score_max, val_loss, val_f_score_avg, val_f_score_max, t1_epoch - t0_epoch))
-        print("")
 
     t1_train = time()
 
     print("[Final model evaluation]\n")
     print("Optimal epoch: %d"%(opt_epoch))
-    print("Est. train loss: %.4f - Est. train F-score Avg: %.4f - Est. train F-score Max: %.4f - Val loss: %.4f - Val F-score Avg: %.4f - Val F-score Max: %.4f - Δt: %.1fs"%(opt_est_train_loss, opt_est_train_f_score_avg, opt_est_train_f_score_max, opt_val_loss, opt_val_f_score_avg, opt_val_f_score_max, t1_train - t0_train))
+    print("Train Set - Est. loss: %.4f - Est. F-score Avg: %.4f - Est. F-score Max: %.4f\nVal Set - Loss: %.4f - F-score Avg: %.4f - F-score Max: %.4f\nΔt: %.1fs"%(opt_est_train_loss, opt_est_train_f_score_avg, opt_est_train_f_score_max, opt_val_loss, opt_val_f_score_avg, opt_val_f_score_max, t1_train - t0_train))
     print("\nOperation completed")
 
 def infer(video_fp: str, audio_included: bool):
@@ -265,19 +265,21 @@ def infer(video_fp: str, audio_included: bool):
 
     print("Input video:\n", video_fp)
 
-    visual_frames_tensor = torch.tensor(extract_condensed_frame_tensor(video_fp, skip_frames = skip_frames), dtype = torch.float32)
+    video_frames, full_n_val_frames = extract_condensed_frame_tensor(video_fp, skip_frames = skip_frames)
+    visual_frames_tensor = torch.tensor(video_frames, dtype = torch.float32)
     full_val_frames = get_frame_tensor(video_fp)
 
     export_audio_from_video(audio_fp = audio_fp, video_fp = video_fp)
     N = len(visual_frames_tensor)
     audio_features_tensor = torch.tensor(extract_audio_features(audio_fp = audio_fp, n_frames = N), dtype = torch.float32)
 
-    data = dataloader(fps = [video_fp], frames = [visual_frames_tensor], full_frames = [full_val_frames], audios = [audio_features_tensor], labels = None)
+    data = dataloader(fps = [video_fp], frames = [visual_frames_tensor], full_n_frames = [full_n_val_frames], audios = [audio_features_tensor], labels = None)
 
     frame_importance_model = audio_visual_model(audio_included = audio_included)
     frame_importance_model.load_state_dict(torch.load(f = opt_frame_importance_model))
 
-    video_id, val_frames, full_val_frames, val_audios, _ = next(iter(data))
+    video_id, val_frames, val_audios, _ = next(iter(data))
+    full_val_frames = get_frame_tensor(fp = video_fp)
 
     val_predictions = frame_importance_model(val_audios, val_frames)
 

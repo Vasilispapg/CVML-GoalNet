@@ -21,8 +21,9 @@ def generate_metric_plots(opt_loss, est_train_losses, est_train_f_scores_avg, es
     ax[0][0].plot(x, val_losses, color = 'cyan', label = 'val')
     ax[0][0].set_ylabel("Loss")
     # ax[0][0].set_xlabel("Epoch")
-    ax[0][0].axhline(y = baseline_loss, color = 'purple', label = 'baseline %.4f'%(baseline_loss))
-    ax[0][0].axhline(y = opt_loss, color = 'yellow', label = 'opt_val %.4f'%(opt_loss))
+    ax[0][0].axhline(y = baseline_loss, color = 'purple', label = 'baseline %.4f'%(baseline_loss), linestyle = "dashed")
+    ax[0][0].axhline(y = opt_loss, color = 'green', label = 'opt_val %.4f'%(opt_loss))
+    ax[0][0].set_ylim(0, 0.9)
     ax[0][0].legend()
     ax[0][0].grid()
 
@@ -32,7 +33,7 @@ def generate_metric_plots(opt_loss, est_train_losses, est_train_f_scores_avg, es
     ax[1][0].plot(x, val_f_scores_max, color = 'blue', label = 'val_max')
     ax[1][0].set_ylabel("F-score")
     ax[1][0].set_xlabel("Epoch")
-    ax[1][0].legend()
+    ax[1][0].legend(fontsize=7)
     ax[1][0].grid()
 
     # plt.show()

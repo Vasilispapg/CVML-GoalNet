@@ -14,15 +14,15 @@ import pandas as pd
 
 class dataloader(Dataset):
 
-    def __init__(self, fps: list[str], frames: list[torch.tensor], full_frames: list[np.ndarray], audios: list[torch.tensor], labels: list[torch.tensor] = None, device: str = 'cpu'):
+    def __init__(self, fps: list[str], frames: list[torch.tensor], full_n_frames: list[np.ndarray], audios: list[torch.tensor], labels: list[torch.tensor] = None, device: str = 'cpu'):
         '''
             Description
                 Video summarization dataset. Each batch is one individual video. Each instance is one frame belonging to the mentioned video-batches.
 
             Parameters
                 fps. File path of a given instance video.
-                frames. For a given video index i, frame[i] has shape (N_i, C, H, W) and each frame is preprocessed.
-                full_frames. For a given video index i, frame[i] has shape (N_i, C, H_i, W_i) containing exactly all raw frames.
+                frames. For a given video index i, frames[i] has shape (N_i, C, H, W) and each frame is preprocessed.
+                full_n_frames. Total number of frames from raw videos.
                 audios. For a given video index i, audios[i] has shape (N_i, K, n_mfcc, B).
                 labels. For a given video index i, labels has shape (N_i,).
                 device. Processing unit identifier, responsible for tensor operations.
@@ -33,8 +33,7 @@ class dataloader(Dataset):
         self.fps = fps
         self.video_ids = [video_fp.split('/')[-1].split('.')[0] for video_fp in self.fps]
         self.frames = [torch.tensor(frames_, dtype = torch.float32, device = device) for frames_ in frames]
-        self.full_frames = full_frames
-        self.full_n_frames = [len(self.full_frames[video_idx]) for video_idx in range(len(self.full_frames))]
+        self.full_n_frames = full_n_frames
         self.audios = [torch.tensor(audios_, dtype = torch.float32, device = device) for audios_ in audios]
         if labels is None:
             self.labels = [None for _ in range(len(frames))]
@@ -68,7 +67,7 @@ class dataloader(Dataset):
         self.title = self.titles[video_idx]
         self.full_n_frames_ = self.full_n_frames[video_idx]
 
-        return self.video_ids[video_idx], self.frames[video_idx], self.full_frames[video_idx], self.audios[video_idx], self.labels[video_idx]
+        return self.video_ids[video_idx], self.frames[video_idx], self.audios[video_idx], self.labels[video_idx]
 
 class SeparableConv2d(nn.Module):
     def __init__(self,in_channels,out_channels,kernel_size=1,stride=1,padding=0,dilation=1,bias=False):
@@ -191,25 +190,24 @@ def extract_condensed_frame_tensor(fp: str, skip_frames: int):
         success, image = video.read()
         if count % skip_frames == 0 and success:
             image = ((image - image.min()) / (image.max() - image.min() + 1e-7)).astype(np.float32)
-            image = cv2.resize(image, (299, 299))
+            image = cv2.resize(image, (50, 50))
             frames.append(image)
         count += 1
+    full_n_frames = count-1
 
     video.release()
 
-    return np.transpose(np.array(frames), axes = (0, 3, 1, 2))
+    return np.transpose(np.array(frames), axes = (0, 3, 1, 2)), full_n_frames
 
 def get_frame_tensor(fp: str):
 
     video = cv2.VideoCapture(fp)
-    count = 0
     success = True
     frames = []
 
     while success:
         success, image = video.read()
         frames.append(image)
-        count += 1
     frames = frames[:-1]
 
     return np.array(frames)
