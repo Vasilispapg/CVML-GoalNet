@@ -11,3 +11,4 @@ video
 *.wav
 *.mp4
 *.png
+saved_model_info/*

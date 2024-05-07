@@ -80,52 +80,50 @@ class SeparableConv2d(nn.Module):
         x = self.conv1(x)
         x = self.pointwise(x)
         return x
+
 class Cnn0(nn.Module):
 
     def __init__(self):
         super(Cnn0, self).__init__()
 
-        self.conv1 = nn.Conv2d(in_channels = 3, out_channels = 32, kernel_size = 3, stride = 2, padding = 0, bias = False)
-        self.bn1 = nn.BatchNorm2d(32)
-        self.relu1 = nn.ReLU(inplace=True)
+        self.conv1 = nn.LazyConv2d(out_channels = 32, kernel_size = 7, stride = 3, padding = 0)
+        self.relu1 = nn.ReLU(inplace = True)
+        self.maxpool1 = nn.MaxPool2d(kernel_size = 3, stride = 2, padding = 0)
 
-        self.maxpool1 = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        self.conv2 = nn.LazyConv2d(out_channels = 128, kernel_size = 3, stride = 1, padding = 2)
+        self.relu2 = nn.ReLU(inplace = True)
+        self.maxpool2 = nn.MaxPool2d(kernel_size = 3, stride = 2, padding = 0)
 
-        self.conv2 = nn.Conv2d(32,64,5,bias=False)
-        self.bn2 = nn.BatchNorm2d(64)
-        self.relu2 = nn.ReLU(inplace=True)
+        self.conv3 = nn.LazyConv2d(out_channels = 256, kernel_size = 3, stride = 1, padding = 1)
+        self.relu3 = nn.ReLU(inplace = True)
+        self.maxpool3 = nn.MaxPool2d(kernel_size = 3, stride = 2, padding = 0)
 
-        self.maxpool1 = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
+        self.conv4 = nn.LazyConv2d(out_channels = 256, kernel_size = 3, stride = 1, padding = 1)
+        self.relu4 = nn.ReLU(inplace = True)
 
-        self.maxpool2 = nn.MaxPool2d(kernel_size=3, stride=2, padding=1)
-
-        self.conv3 = SeparableConv2d(64,128,5,2,1)
-        self.bn3 = nn.BatchNorm2d(128)
-        self.relu3 = nn.ReLU(inplace=True)
-
-        self.conv4 = SeparableConv2d(128,256,3,2,1)
-        self.bn4 = nn.BatchNorm2d(256)
+        self.linear5 = nn.LazyLinear(out_features = 512)
 
     def features(self, input):
 
         x = self.conv1(input)
-        x = self.bn1(x)
         x = self.relu1(x)
-
         x = self.maxpool1(x)
 
         x = self.conv2(x)
-        x = self.bn2(x)
         x = self.relu2(x)
-
         x = self.maxpool2(x)
 
         x = self.conv3(x)
-        x = self.bn3(x)
         x = self.relu3(x)
+        x = self.maxpool3(x)
 
         x = self.conv4(x)
-        x = self.bn4(x)
+        x = self.relu4(x)
+
+        x = torch.flatten(x, start_dim = 1)
+        
+        x = self.linear5(x)
+
         return x
 
     def forward(self, input):
@@ -148,7 +146,7 @@ class audio_visual_model(nn.Module):
         self.audio_model = nn.Sequential(
             nn.Conv1d(in_channels=30, out_channels=64, kernel_size=3, stride=2, padding=1),
             nn.ReLU(),
-            nn.Conv1d(in_channels=64, out_channels=128, kernel_size=3, stride=2, padding=1),
+            nn.LazyConv1d(out_channels=128, kernel_size=3, stride=2, padding=1),
             nn.ReLU(),
             nn.Flatten(),
             nn.LazyLinear(256),
@@ -156,19 +154,15 @@ class audio_visual_model(nn.Module):
         )
 
         self.fusion = nn.Sequential(
+            nn.LazyLinear(512),
             nn.LazyLinear(1),
             nn.Sigmoid()
         )
 
     def forward(self, audio_input, visual_input):
 
-
         with torch.no_grad():
-            features = self.visual_model(visual_input)  # Extract features using Xception
-        visual_features = nn.ReLU(inplace=True)(features)
-        visual_features = F.adaptive_avg_pool2d(visual_features, (1, 1))
-        visual_features = visual_features.view(visual_features.size(0), -1)
-        visual_features = nn.LazyLinear(512).to(visual_features.device)(visual_features)
+            visual_features = self.visual_model(visual_input)
 
         if self.audio_included:
             audio_features = self.audio_model(audio_input)
@@ -190,7 +184,7 @@ def extract_condensed_frame_tensor(fp: str, skip_frames: int):
         success, image = video.read()
         if count % skip_frames == 0 and success:
             image = ((image - image.min()) / (image.max() - image.min() + 1e-7)).astype(np.float32)
-            image = cv2.resize(image, (50, 50))
+            image = cv2.resize(image, (90, 90))
             frames.append(image)
         count += 1
     full_n_frames = count-1
@@ -357,7 +351,6 @@ def get_clip_information(clip_intervals: list[list[int]], importances: list[int]
     '''
 
     full_n_frames = len(importances)
-    assert clip_intervals[-1][-1] + 1 == full_n_frames, "E: Incompatible lengths"
     clip_importances = []
     clip_lengths = []
     for clip_interval in clip_intervals:
@@ -365,7 +358,7 @@ def get_clip_information(clip_intervals: list[list[int]], importances: list[int]
         clip_importances.append(sum(importances_slice))
         clip_lengths.append(len(importances_slice))
 
-    return clip_importances, clip_lengths
+    return clip_importances, clip_lengths, clip_intervals
 
 def knapsack(values, weights, capacity, scale_factor=5):
     """
@@ -438,11 +431,11 @@ def load_mat_file(file_path,videoID):
         video_refs=file['tvsum50']['video'][:] # type: ignore
 
         decoded_videos = decode_titles(video_refs,file)
-    
-        annotations = []        
+
+        annotations = []
         # Get the index from decoded video list to find the annotation for the video
         index = [i for i, x in enumerate(decoded_videos) if x.lower() in videoID.lower()][0]
-        
+
         # Iterate over each reference
         for ref in user_anno_refs:
             # Dereference each HDF5 object reference
@@ -450,7 +443,7 @@ def load_mat_file(file_path,videoID):
 
             # Convert to NumPy array and add to the annotations list
             annotations.append(np.array(ref_data))
-            
+
         return annotations[index]
 
 def evaluate_summary(predicted_summary, user_summary, eval_method='avg'):
@@ -502,7 +495,7 @@ def postprocessing(video_id, h5_file_path, mat_file_path, batch_predictions, ski
     with h5py.File(h5_file_path, 'r') as file:
         clip_intervals = file[video_id_map[video_id]]['change_points'][:]
 
-    clip_importances, clip_lengths = get_clip_information(clip_intervals = clip_intervals, importances = expanded_batch_predictions)
+    clip_importances, clip_lengths, clip_intervals = get_clip_information(clip_intervals = clip_intervals, importances = expanded_batch_predictions)
 
     max_knapsack_capacity = int(0.15 * full_n_frames)
 
