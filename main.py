@@ -321,17 +321,11 @@ def infer(video_fp: str, audio_included: bool):
         video_id = video_id,
         h5_file_path = h5_file_path,
         mat_file_path = mat_file_path,
-        batch_predictions = val_predictions,
+        batch_importances = val_predictions,
         skip_frames = skip_frames,
         full_n_frames = full_n_val_frames,
         full_frames = full_val_frames
     )
-
-    # Summarization evaluation
-    # f_score_avg, f_score_max = get_fscore(ground_truth_path = mat_file_path, summary_indices = summarized_video_frame_indices, video_id = video_fp.split('/')[-1].split('.')[0])
-
-    # print('F-score Avg: %.2f'%(f_score_avg))
-    # print('F-score Max: %.2f'%(f_score_max))
 
     export_video(frames = summarized_video, output_path = "./tmp/%s.mp4"%(data.title), frame_rate = 30)
     print("\n[Exported video details]\n\nID: %s\nTitle: %s"%(video_id, data.title))
