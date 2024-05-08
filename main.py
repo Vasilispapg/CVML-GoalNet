@@ -8,7 +8,7 @@ from time import time
 import torch.nn as nn
 import numpy as np
 
-from utils import get_annotations, extract_condensed_frame_tensor, export_audio_from_video, extract_audio_features, dataloader, audio_visual_model, export_video, get_frame_tensor, evaluation_method, postprocessing, Cnn0
+from utils import get_annotations, extract_condensed_frame_tensor, export_audio_from_video, extract_audio_features, dataloader, audio_visual_model, export_video, get_frame_tensor, get_fscore, postprocessing, Cnn0, load_mat_file
 from visualization import generate_metric_plots
 
 class color:
@@ -25,7 +25,7 @@ class color:
 
 def train_importance_model(audio_included, load_ckp):
 
-    def get_f_scores(video_id, batch_predictions, full_n_batch_frames):
+    def get_fscores_(video_id, batch_predictions, full_n_batch_frames, gd_summarized_video_frame_indices):
 
         # Clips and Knapsack optimization
         _, summarized_video_frame_indices = postprocessing\
@@ -33,14 +33,14 @@ def train_importance_model(audio_included, load_ckp):
             video_id = video_id,
             h5_file_path = h5_file_path,
             mat_file_path = mat_file_path,
-            batch_predictions = batch_predictions,
+            batch_importances = batch_predictions,
             skip_frames = skip_frames,
             full_n_frames = full_n_batch_frames,
             full_frames = None
         )
 
         # Summarization evaluation
-        f_score_avg, f_score_max = evaluation_method(ground_truth_path = mat_file_path, summary_indices = summarized_video_frame_indices, video_id = video_id)
+        f_score_avg, f_score_max = get_fscore(gd_summary_indices = gd_summarized_video_frame_indices, predicted_summary_indices = summarized_video_frame_indices)
 
         return f_score_avg, f_score_max
 
@@ -66,7 +66,7 @@ def train_importance_model(audio_included, load_ckp):
     skip_frames = 15
 
     # Hyperparameters (training process - frame importance model)
-    num_epochs = 30 # 100
+    num_epochs = 10 # 100
     lr = 0.0001
 
     ## ! Initialization: End
@@ -79,6 +79,7 @@ def train_importance_model(audio_included, load_ckp):
     frames = []
     audios = []
     full_n_frames = []
+    gd_summarized_video_frame_indices = []
     for video_fp in video_fps:
         video_id = video_fp.split('/')[-1].split('.')[0]
         audio_fp = ".".join(video_fp.split(".")[:-1]) + ".wav"
@@ -91,12 +92,30 @@ def train_importance_model(audio_included, load_ckp):
         if not os.path.exists(audio_fp):
             export_audio_from_video(audio_fp = audio_fp, video_fp = video_fp)
         audio_features_tensor = extract_audio_features(audio_fp = audio_fp, n_frames = N)
+
+        gd = load_mat_file(mat_file_path, video_id)
+        gd_summarized_video_frame_indices_one_annotator = []
+        for annotator_gd in gd:
+
+            _, summarized_video_frame_indices = postprocessing\
+            (
+                video_id = video_id,
+                h5_file_path = h5_file_path,
+                mat_file_path = mat_file_path,
+                batch_importances = torch.tensor(annotator_gd[:, None]),
+                skip_frames = skip_frames,
+                full_n_frames = full_n_frames_,
+                full_frames = None
+            )
+            gd_summarized_video_frame_indices_one_annotator.append(summarized_video_frame_indices)
+        gd_summarized_video_frame_indices.append(np.array(gd_summarized_video_frame_indices_one_annotator))
+
         full_n_frames.append(full_n_frames_)
         frames.append(visual_frames_tensor)
         audios.append(audio_features_tensor)
 
-    val_dataset = dataloader(fps = [video_fps.pop()], frames = [frames.pop()], full_n_frames = [full_n_frames.pop()], audios = [audios.pop()], labels = [ground_truths_trimmed.pop()])
-    train_dataset = dataloader(fps = video_fps, frames = frames, full_n_frames = full_n_frames, audios = audios, labels = ground_truths_trimmed)
+    val_dataset = dataloader(fps = [video_fps.pop()], frames = [frames.pop()], full_n_frames = [full_n_frames.pop()], audios = [audios.pop()], labels = [ground_truths_trimmed.pop()], gd_summarized_video_frame_indices = [gd_summarized_video_frame_indices.pop()])
+    train_dataset = dataloader(fps = video_fps, frames = frames, full_n_frames = full_n_frames, audios = audios, labels = ground_truths_trimmed, gd_summarized_video_frame_indices = gd_summarized_video_frame_indices)
     del frames, audios, ground_truths_trimmed
 
     print("Number of train videos: %d"%(len(train_dataset)))
@@ -107,6 +126,7 @@ def train_importance_model(audio_included, load_ckp):
         frame_importance_model.load_state_dict(torch.load(f = ckp_frame_importance_model_fp))
 
     criterion = nn.MSELoss()
+    # criterion = nn.CrossEntropyLoss()
     optimizer = optim.Adam(params = frame_importance_model.parameters(), lr = lr)
 
     est_train_losses = []
@@ -124,26 +144,30 @@ def train_importance_model(audio_included, load_ckp):
     train_losses = []
     train_f_scores_avg = []
     train_f_scores_max = []
-    for video_idx, (video_id, batch_frames, batch_audios, batch_labels) in enumerate(train_dataset):
+    for video_idx, (video_id, batch_frames, batch_audios, batch_labels, batch_gd_summarized_video_frame_indices_) in enumerate(train_dataset):
         with torch.no_grad():
             batch_predictions = frame_importance_model(batch_audios, batch_frames)
+            # train_losses.append(criterion(batch_predictions, (batch_labels-1).long()).item())
+            # batch_predictions = torch.argmax(batch_predictions, axis = 1) + 1
             train_losses.append(criterion(batch_predictions, batch_labels).item())
             full_n_batch_frames = train_dataset.full_n_frames_
-            batch_f_score_avg, batch_f_score_max = get_f_scores(video_id = video_id, batch_predictions = batch_predictions, full_n_batch_frames = full_n_batch_frames)
-            print("Video: %d/%d - ID: %s\nBatch Set - Size: %d - Loss: %.4f - F-score Avg: %.4f%% - F-score Max: %.2f%%"%(video_idx, len(train_dataset)-1, video_id, full_n_batch_frames, train_losses[-1], batch_f_score_avg, batch_f_score_max))
+            batch_f_score_avg, batch_f_score_max = get_fscores_(video_id = video_id, batch_predictions = batch_predictions, full_n_batch_frames = full_n_batch_frames, gd_summarized_video_frame_indices = batch_gd_summarized_video_frame_indices_)
+            print("Video: %d/%d - ID: %s\nBatch Set - Size: %d - Loss: %.4f - F-score Avg: %.4f - F-score Max: %.2f"%(video_idx, len(train_dataset)-1, video_id, full_n_batch_frames, train_losses[-1], batch_f_score_avg, batch_f_score_max))
             train_f_scores_avg.append(batch_f_score_avg)
             train_f_scores_max.append(batch_f_score_max)
         torch.cuda.empty_cache()
 
-    video_id, val_frames, val_audios, val_labels = next(iter(val_dataset))
+    video_id, val_frames, val_audios, val_labels, val_gd_summarized_video_frame_indices_ = next(iter(val_dataset))
 
     print("Validation video: %s"%(video_id))
 
     with torch.no_grad():
         val_predictions = frame_importance_model(val_audios, val_frames)
+        # val_loss = criterion(val_predictions, (val_labels-1).long()).item()
+        # val_predictions = torch.argmax(val_predictions, axis = 1) + 1
         val_loss = criterion(val_predictions, val_labels).item()
         full_n_val_frames = val_dataset.full_n_frames_
-        val_f_score_avg, val_f_score_max = get_f_scores(video_id = video_id, batch_predictions = val_predictions, full_n_batch_frames = full_n_val_frames)
+        val_f_score_avg, val_f_score_max = get_fscores_(video_id = video_id, batch_predictions = val_predictions, full_n_batch_frames = full_n_val_frames, gd_summarized_video_frame_indices = val_gd_summarized_video_frame_indices_)
 
     train_est_loss = sum(train_losses) / len(train_losses)
     est_train_f_score_avg = sum(train_f_scores_avg) / len(train_f_scores_avg)
@@ -165,7 +189,7 @@ def train_importance_model(audio_included, load_ckp):
     val_f_scores_max.append(val_f_score_max)
 
     t1 = time()
-    print("Train Set - Est. loss: %.4f - Est. F-score Avg: %.2f%% - Est. F-score Max: %.2f\nVal Set - Loss: %.4f - F-score Avg: %.2f - F-score Max: %.2f\nΔt: %.1fs"%(train_est_loss, est_train_f_score_avg, est_train_f_score_max, val_loss, val_f_score_avg, val_f_score_max, t1-t0))
+    print("Train Set - Est. loss: %.4f - Est. F-score Avg: %.2f - Est. F-score Max: %.2f\nVal Set - Loss: %.4f - F-score Avg: %.2f - F-score Max: %.2f\nΔt: %.1fs"%(train_est_loss, est_train_f_score_avg, est_train_f_score_max, val_loss, val_f_score_avg, val_f_score_max, t1-t0))
 
     # ! Evaluation of model prior to training: End
 
@@ -180,37 +204,41 @@ def train_importance_model(audio_included, load_ckp):
         train_f_scores_max = []
         t0_epoch = time()
         print(color.BOLD + "Epoch %d/%d"%(epoch, num_epochs-1) + color.END + "\n")
-        for video_idx, (video_id, batch_frames, batch_audios, batch_labels) in enumerate(train_dataset):
+        for video_idx, (video_id, batch_frames, batch_audios, batch_labels, batch_gd_summarized_video_frame_indices_) in enumerate(train_dataset):
 
             t0_step = time()
 
             # Train step
             optimizer.zero_grad()
             batch_predictions = frame_importance_model(batch_audios, batch_frames)
+            # batch_loss = criterion(batch_predictions, (batch_labels-1).long())
+            # batch_predictions = torch.argmax(batch_predictions, axis = 1) + 1
             batch_loss = criterion(batch_predictions, batch_labels)
             batch_loss.backward()
             optimizer.step()
             full_n_batch_frames = train_dataset.full_n_frames_
             batch_losses.append(batch_loss.item())
 
-            batch_f_score_avg, batch_f_score_max = get_f_scores(video_id = video_id, batch_predictions = batch_predictions, full_n_batch_frames = full_n_batch_frames)
+            batch_f_score_avg, batch_f_score_max = get_fscores_(video_id = video_id, batch_predictions = batch_predictions, full_n_batch_frames = full_n_batch_frames, gd_summarized_video_frame_indices = batch_gd_summarized_video_frame_indices_)
 
             train_f_scores_avg.append(batch_f_score_avg)
             train_f_scores_max.append(batch_f_score_max)
 
             # Val scores
-            video_id_val, val_frames, val_audios, val_labels = next(iter(val_dataset))
+            video_id_val, val_frames, val_audios, val_labels, val_gd_summarized_video_frame_indices_ = next(iter(val_dataset))
             with torch.no_grad():
                 val_predictions = frame_importance_model(val_audios, val_frames)
+                # val_loss = criterion(val_predictions, (val_labels-1).long()).item()
+                # val_predictions = torch.argmax(val_predictions, axis = 1) + 1
                 val_loss = criterion(val_predictions, val_labels).item()
                 full_n_val_frames = val_dataset.full_n_frames_
-                val_f_score_avg, val_f_score_max = get_f_scores(video_id = video_id_val, batch_predictions = val_predictions, full_n_batch_frames = full_n_val_frames)
+                val_f_score_avg, val_f_score_max = get_fscores_(video_id = video_id_val, batch_predictions = val_predictions, full_n_batch_frames = full_n_val_frames, gd_summarized_video_frame_indices = val_gd_summarized_video_frame_indices_)
 
             torch.cuda.empty_cache()
 
             t1_step = time()
 
-            print("Video: %d/%d - ID: %s\nBatch Set - Size: %d - Loss: %.4f - F-score Avg: %.2f%% - F-score Max: %.2f%%\nVal Set - Loss: %.4f - F-score Avg: %.2f%% - F-score Max: %.2f%%\nΔt: %.1fs"%(video_idx, len(train_dataset)-1, video_id, full_n_batch_frames, batch_losses[-1], batch_f_score_avg, batch_f_score_max, val_loss, val_f_score_avg, val_f_score_max, t1_step-t0_step))
+            print("Video: %d/%d - ID: %s\nBatch Set - Size: %d - Loss: %.4f - F-score Avg: %.2f - F-score Max: %.2f\nVal Set - Loss: %.4f - F-score Avg: %.2f - F-score Max: %.2f\nΔt: %.1fs"%(video_idx, len(train_dataset)-1, video_id, full_n_batch_frames, batch_losses[-1], batch_f_score_avg, batch_f_score_max, val_loss, val_f_score_avg, val_f_score_max, t1_step-t0_step))
         train_est_loss = sum(batch_losses) / len(batch_losses)
         est_train_f_score_avg = sum(train_f_scores_avg) / len(train_f_scores_avg)
         est_train_f_score_max = sum(train_f_scores_max) / len(train_f_scores_max)
@@ -242,14 +270,14 @@ def train_importance_model(audio_included, load_ckp):
         generate_metric_plots(opt_val_loss, est_train_losses, est_train_f_scores_avg, est_train_f_scores_max, val_losses, val_f_scores_avg, val_f_scores_max, exported_image_fp = exported_image_fp)
 
         t1_epoch = time()
-        print("Train Set - Est. loss: %.4f - Est. F-score Avg: %.2f%% - Est. F-score Max: %.2f%%\nVal Set - Loss: %.4f - F-score Avg: %.2f%% - F-score Max: %.2f%%\nΔt: %.1fs"%(train_est_loss, est_train_f_score_avg, est_train_f_score_max, val_loss, val_f_score_avg, val_f_score_max, t1_epoch - t0_epoch))
+        print("Train Set - Est. loss: %.4f - Est. F-score Avg: %.2f - Est. F-score Max: %.2f\nVal Set - Loss: %.4f - F-score Avg: %.2f - F-score Max: %.2f\nΔt: %.1fs"%(train_est_loss, est_train_f_score_avg, est_train_f_score_max, val_loss, val_f_score_avg, val_f_score_max, t1_epoch - t0_epoch))
         print()
 
     t1_train = time()
 
     print("[Final model evaluation]\n")
     print("Optimal epoch: %d"%(opt_epoch))
-    print("Train Set - Est. loss: %.4f - Est. F-score Avg: %.2f%% - Est. F-score Max: %.2f%%\nVal Set - Loss: %.4f - F-score Avg: %.2f%% - F-score Max: %.2f%%\nΔt: %.1fs"%(opt_est_train_loss, opt_est_train_f_score_avg, opt_est_train_f_score_max, opt_val_loss, opt_val_f_score_avg, opt_val_f_score_max, t1_train - t0_train))
+    print("Train Set - Est. loss: %.4f - Est. F-score Avg: %.2f - Est. F-score Max: %.2f\nVal Set - Loss: %.4f - F-score Avg: %.2f - F-score Max: %.2f\nΔt: %.1fs"%(opt_est_train_loss, opt_est_train_f_score_avg, opt_est_train_f_score_max, opt_val_loss, opt_val_f_score_avg, opt_val_f_score_max, t1_train - t0_train))
     print("\nOperation completed")
 
 def infer(video_fp: str, audio_included: bool):
@@ -300,10 +328,10 @@ def infer(video_fp: str, audio_included: bool):
     )
 
     # Summarization evaluation
-    # f_score_avg, f_score_max = evaluation_method(ground_truth_path = mat_file_path, summary_indices = summarized_video_frame_indices, video_id = video_fp.split('/')[-1].split('.')[0])
+    # f_score_avg, f_score_max = get_fscore(ground_truth_path = mat_file_path, summary_indices = summarized_video_frame_indices, video_id = video_fp.split('/')[-1].split('.')[0])
 
-    # print('F-score Avg: %.2f%%'%(f_score_avg))
-    # print('F-score Max: %.2f%%'%(f_score_max))
+    # print('F-score Avg: %.2f'%(f_score_avg))
+    # print('F-score Max: %.2f'%(f_score_max))
 
     export_video(frames = summarized_video, output_path = "./tmp/%s.mp4"%(data.title), frame_rate = 30)
     print("\n[Exported video details]\n\nID: %s\nTitle: %s"%(video_id, data.title))

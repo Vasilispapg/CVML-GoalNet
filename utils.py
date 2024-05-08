@@ -14,7 +14,7 @@ import pandas as pd
 
 class dataloader(Dataset):
 
-    def __init__(self, fps: list[str], frames: list[torch.tensor], full_n_frames: list[np.ndarray], audios: list[torch.tensor], labels: list[torch.tensor] = None, device: str = 'cpu'):
+    def __init__(self, fps: list[str], frames: list[torch.tensor], full_n_frames: list[np.ndarray], audios: list[torch.tensor], labels: list[torch.tensor] = None, gd_summarized_video_frame_indices: list[np.ndarray] = None, device: str = 'cpu'):
         '''
             Description
                 Video summarization dataset. Each batch is one individual video. Each instance is one frame belonging to the mentioned video-batches.
@@ -23,11 +23,12 @@ class dataloader(Dataset):
                 fps. File path of a given instance video.
                 frames. For a given video index i, frames[i] has shape (N_i, C, H, W) and each frame is preprocessed.
                 full_n_frames. Total number of frames from raw videos.
-                audios. For a given video index i, audios[i] has shape (N_i, K, n_mfcc, B).
-                labels. For a given video index i, labels has shape (N_i,).
+                audios. For a given video index i, audios[i] has shape (N_i, n_mfcc, B).
+                labels. For a given video index i, labels[i] has shape (N_i,).
+                gd_summarized_video_frame_indices. For a given video index i, gd_summarized_video_frame_indices[i] has shape (N_annotators, N_i). Each value could either be 1 denoting that the frame is included or 0 denoting that the frame is not included. This is based on the Knapsack 0-1 algorithm and an importance vector for each annotator.
                 device. Processing unit identifier, responsible for tensor operations.
 
-                N is the number of frames; B is the number of timestamps per bin of the MFCC algorithm; C is the number of visual channels.
+                N_i is the number of frames for a video with index i; B is the number of timestamps per bin of the MFCC algorithm; C is the number of visual channels.
         '''
 
         self.fps = fps
@@ -36,10 +37,11 @@ class dataloader(Dataset):
         self.full_n_frames = full_n_frames
         self.audios = [torch.tensor(audios_, dtype = torch.float32, device = device) for audios_ in audios]
         if labels is None:
-            self.labels = [None for _ in range(len(frames))]
+            self.labels = self.gd_summarized_video_frame_indices = [None for _ in range(len(frames))]
             assert len(self.frames) == len(self.audios), 'E: Inconsistency in data loader definition'
         else:
             self.labels = [torch.tensor(labels_, dtype = torch.float32, device = device) for labels_ in labels]
+            self.gd_summarized_video_frame_indices = gd_summarized_video_frame_indices
             assert len(self.frames) == len(self.audios) == len(self.labels), 'E: Inconsistency in data loader definition'
 
         self.titles = self.get_titles(self.video_ids)
@@ -67,19 +69,7 @@ class dataloader(Dataset):
         self.title = self.titles[video_idx]
         self.full_n_frames_ = self.full_n_frames[video_idx]
 
-        return self.video_ids[video_idx], self.frames[video_idx], self.audios[video_idx], self.labels[video_idx]
-
-class SeparableConv2d(nn.Module):
-    def __init__(self,in_channels,out_channels,kernel_size=1,stride=1,padding=0,dilation=1,bias=False):
-        super(SeparableConv2d,self).__init__()
-
-        self.conv1 = nn.Conv2d(in_channels,in_channels,kernel_size,stride,padding,dilation,groups=in_channels,bias=bias)
-        self.pointwise = nn.Conv2d(in_channels,out_channels,1,1,0,1,1,bias=bias)
-
-    def forward(self,x):
-        x = self.conv1(x)
-        x = self.pointwise(x)
-        return x
+        return self.video_ids[video_idx], self.frames[video_idx], self.audios[video_idx], self.labels[video_idx], self.gd_summarized_video_frame_indices[video_idx]
 
 class Cnn0(nn.Module):
 
@@ -102,6 +92,7 @@ class Cnn0(nn.Module):
         self.relu4 = nn.ReLU(inplace = True)
 
         self.linear5 = nn.LazyLinear(out_features = 512)
+        self.relu5 = nn.ReLU(inplace = True)
 
     def features(self, input):
 
@@ -123,6 +114,7 @@ class Cnn0(nn.Module):
         x = torch.flatten(x, start_dim = 1)
         
         x = self.linear5(x)
+        x = self.relu5(x)
 
         return x
 
@@ -155,8 +147,10 @@ class audio_visual_model(nn.Module):
 
         self.fusion = nn.Sequential(
             nn.LazyLinear(512),
+            nn.ReLU(),
             nn.LazyLinear(1),
             nn.Sigmoid()
+            # nn.Softmax(dim = 1),
         )
 
     def forward(self, audio_input, visual_input):
@@ -169,8 +163,9 @@ class audio_visual_model(nn.Module):
             combined_features = torch.cat((audio_features, visual_features), axis = -1)
         else:
             combined_features = visual_features
+        output = self.fusion(combined_features)
+        output = 4 * output + 1
 
-        output = 4 * self.fusion(combined_features) + 1
         return output
 
 def extract_condensed_frame_tensor(fp: str, skip_frames: int):
@@ -215,7 +210,7 @@ def export_audio_from_video(audio_fp, video_fp):
 def extract_audio_features(audio_fp: str, n_frames: int) -> np.array:
     '''
         Returns:
-            mfccs_per_frame. Shape (N,F,T), where N is the number of frames, F is the number of MFC coefficients and T is the frame's bin time length.
+            mfccs_per_frame. Shape (N, n_mfcc, T), where N is the number of frames, F is the number of MFC coefficients and T is the frame's bin time length.
     '''
 
     T = 26
@@ -446,42 +441,38 @@ def load_mat_file(file_path,videoID):
 
         return annotations[index]
 
-def evaluate_summary(predicted_summary, user_summary, eval_method='avg'):
-    max_len = max(len(predicted_summary), user_summary.shape[1])
-    S = np.zeros(max_len, dtype=int)
-    G = np.zeros(max_len, dtype=int)
-    S[:len(predicted_summary)] = predicted_summary
+def get_fscore(gd_summary_indices: np.ndarray, predicted_summary_indices: np.ndarray):
+    '''
+        Parameters:
+            gd_summary_indices. Shape (20, N_i).
+            predicted_summary_indices. Shape (N_i,).
+    '''
+
+    n_users = gd_summary_indices.shape[0]
+    assert gd_summary_indices.shape[1] == len(predicted_summary_indices)
+    full_n_frames = len(predicted_summary_indices)
+    S = predicted_summary_indices
+    G = np.zeros(full_n_frames, dtype=int)
 
     f_scores = []
-    for user in range(user_summary.shape[0]):
-        G[:user_summary.shape[1]] = user_summary[user]
-        overlapped = S & G
-        
+    for user in range(n_users):
+        G = gd_summary_indices[user]
+        overlapped = np.logical_and(S, G) # Only positive frames (i.e. frames included in video from both prediction and annotator)
         precision = sum(overlapped) / sum(S) if sum(S) != 0 else 0
         recall = sum(overlapped) / sum(G) if sum(G) != 0 else 0
-        f_score = 2 * precision * recall / (precision + recall) if (precision + recall) != 0 else 0
-        f_scores.append(f_score * 100)  # multiplied by 100 for percentage
+        f_score = precision * recall / (precision + recall) if (precision + recall) != 0 else 0
+        f_scores.append(f_score)
 
-    if eval_method == 'max':
-        return max(f_scores)
-    else:  # 'avg'
-        return sum(f_scores) / len(f_scores)
+    return sum(f_scores) / len(f_scores), max(f_scores)
 
-def evaluation_method(ground_truth_path, summary_indices,video_id):
+def postprocessing(video_id, h5_file_path, mat_file_path, batch_importances, skip_frames, full_n_frames, full_frames = None):
 
-    # Get the ground_truth
-    ground_truth = np.array(load_mat_file(ground_truth_path, video_id))
+    if len(batch_importances.shape) != 1:
+        assert len(batch_importances.shape) == 2 and batch_importances.shape[-1] == 1, 'E: Invalid shape for importance tensor'
+        batch_importances = batch_importances[:, 0]
+    batch_importances = torch.round(batch_importances).type(torch.int8).tolist()
 
-    f_score_max = evaluate_summary(summary_indices, ground_truth, 'max')
-    f_score_avg = evaluate_summary(summary_indices, ground_truth)
-
-    return f_score_avg, f_score_max
-
-def postprocessing(video_id, h5_file_path, mat_file_path, batch_predictions, skip_frames, full_n_frames, full_frames = None):
-
-    batch_predictions = torch.round(batch_predictions[:, 0]).type(torch.int8).tolist()
-
-    expanded_batch_predictions = expand_array(arr = batch_predictions, expansion_rate = skip_frames, length = full_n_frames)
+    expanded_batch_importances = expand_array(arr = batch_importances, expansion_rate = skip_frames, length = full_n_frames)
 
     video_data_h5 = get_video_data_from_h5(h5_file_path)
     video_data_mat = get_video_data_from_mat(mat_file_path)
@@ -495,7 +486,7 @@ def postprocessing(video_id, h5_file_path, mat_file_path, batch_predictions, ski
     with h5py.File(h5_file_path, 'r') as file:
         clip_intervals = file[video_id_map[video_id]]['change_points'][:]
 
-    clip_importances, clip_lengths, clip_intervals = get_clip_information(clip_intervals = clip_intervals, importances = expanded_batch_predictions)
+    clip_importances, clip_lengths, clip_intervals = get_clip_information(clip_intervals = clip_intervals, importances = expanded_batch_importances)
 
     max_knapsack_capacity = int(0.15 * full_n_frames)
 
