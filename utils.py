@@ -11,6 +11,7 @@ import librosa
 import h5py
 import pandas as pd
 import os
+from matplotlib import pyplot as plt
 
 
 class dataloader(Dataset):
@@ -94,7 +95,7 @@ def get_dataloaders(video_fps, skip_frames, train_ratio, annotation_fp, mat_file
         audio_features_tensor = extract_audio_features(audio_fp = audio_fp, n_frames = N)
 
         gd = load_mat_file(mat_file_path, video_id)
-        gd_summarized_video_frame_indices_one_annotator = []
+        gd_summarized_video_frame_indices_per_annotator = []
         for annotator_gd in gd:
 
             _, summarized_video_frame_indices = postprocess\
@@ -107,8 +108,8 @@ def get_dataloaders(video_fps, skip_frames, train_ratio, annotation_fp, mat_file
                 full_n_frames = full_n_frames_,
                 full_frames = None
             )
-            gd_summarized_video_frame_indices_one_annotator.append(summarized_video_frame_indices)
-        gd_summarized_video_frame_indices.append(np.array(gd_summarized_video_frame_indices_one_annotator))
+            gd_summarized_video_frame_indices_per_annotator.append(summarized_video_frame_indices)
+        gd_summarized_video_frame_indices.append(np.array(gd_summarized_video_frame_indices_per_annotator))
 
         full_n_frames.append(full_n_frames_)
         frames.append(visual_frames_tensor)
@@ -263,7 +264,7 @@ def extract_condensed_frame_tensor(fp: str, skip_frames: int):
         success, image = video.read()
         if count % skip_frames == 0 and success:
             image = ((image - image.min()) / (image.max() - image.min() + 1e-7)).astype(np.float32)
-            image = cv2.resize(image, (90, 90))
+            image = cv2.resize(image, (50, 50))
             frames.append(image)
         count += 1
     full_n_frames = count-1
@@ -374,6 +375,10 @@ def get_annotations(annotation_fp, video_id, skip_frames):
     return mean_annotations_trimmed, mean_annotations_full
 
 def expand_array(arr, expansion_rate, length):
+
+    if len(arr) == length:
+        return arr
+
     expanded_arr = []
     for el in arr:
         expanded_arr += [el] * expansion_rate
@@ -542,11 +547,13 @@ def get_fscore(gd_summary_indices: np.ndarray, predicted_summary_indices: np.nda
     precisions = []
     recalls = []
     for user in range(n_users):
+
         G = gd_summary_indices[user]
         overlapped = np.logical_and(S, G) # Only positive frames (i.e. frames included in video from both prediction and annotator)
         precision = sum(overlapped) / sum(S) if sum(S) != 0 else 0
         recall = sum(overlapped) / sum(G) if sum(G) != 0 else 0
         f_score = 2 * precision * recall / (precision + recall) if (precision + recall) != 0 else 0
+
         f_scores.append(f_score)
         precisions.append(precision)
         recalls.append(recall)
@@ -569,6 +576,10 @@ def postprocess_and_get_fscores(video_id, batch_predictions, full_n_batch_frames
 
     # Summarization evaluation
     f_score_avg, f_score_max = get_fscore(gd_summary_indices = gd_summarized_video_frame_indices, predicted_summary_indices = summarized_video_frame_indices)
+
+    A = np.concatenate((gd_summarized_video_frame_indices, summarized_video_frame_indices[None, :]), axis = 0)
+    plt.imshow(A, aspect = 150)
+    plt.savefig("./tmp/indices.png")
 
     return f_score_avg, f_score_max
 

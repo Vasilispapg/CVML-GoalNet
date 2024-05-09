@@ -269,7 +269,7 @@ def infer(video_fp: str, audio_included: bool):
     mat_file_path = 'ydata-tvsum50-v1_1/ground_truth/ydata-tvsum50.mat'
     audio_fp = ".".join(video_fp.split(".")[:-1]) + ".wav"
 
-    skip_frames = 30
+    skip_frames = 60 # 2-seconds per annotation
 
     print("Input video:\n", video_fp)
 
