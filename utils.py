@@ -10,11 +10,12 @@ import numpy as np
 import librosa
 import h5py
 import pandas as pd
+import os
 
 
 class dataloader(Dataset):
 
-    def __init__(self, fps: list[str], frames: list[torch.tensor], full_n_frames: list[np.ndarray], audios: list[torch.tensor], labels: list[torch.tensor] = None, gd_summarized_video_frame_indices: list[np.ndarray] = None, device: str = 'cpu'):
+    def __init__(self, fps: list[str], frames: list[torch.tensor], full_n_frames: list[np.ndarray], audios: list[torch.tensor], labels: list[torch.tensor] = None, gd_summarized_video_frame_indices: list[np.ndarray] = None):
         '''
             Description
                 Video summarization dataset. Each batch is one individual video. Each instance is one frame belonging to the mentioned video-batches.
@@ -33,14 +34,14 @@ class dataloader(Dataset):
 
         self.fps = fps
         self.video_ids = [video_fp.split('/')[-1].split('.')[0] for video_fp in self.fps]
-        self.frames = [torch.tensor(frames_, dtype = torch.float32, device = device) for frames_ in frames]
+        self.frames = [torch.tensor(frames_, dtype = torch.float32) for frames_ in frames]
         self.full_n_frames = full_n_frames
-        self.audios = [torch.tensor(audios_, dtype = torch.float32, device = device) for audios_ in audios]
+        self.audios = [torch.tensor(audios_, dtype = torch.float32) for audios_ in audios]
         if labels is None:
             self.labels = self.gd_summarized_video_frame_indices = [None for _ in range(len(frames))]
             assert len(self.frames) == len(self.audios), 'E: Inconsistency in data loader definition'
         else:
-            self.labels = [torch.tensor(labels_, dtype = torch.float32, device = device) for labels_ in labels]
+            self.labels = [torch.tensor(labels_, dtype = torch.float32) for labels_ in labels]
             self.gd_summarized_video_frame_indices = gd_summarized_video_frame_indices
             assert len(self.frames) == len(self.audios) == len(self.labels), 'E: Inconsistency in data loader definition'
 
@@ -71,10 +72,74 @@ class dataloader(Dataset):
 
         return self.video_ids[video_idx], self.frames[video_idx], self.audios[video_idx], self.labels[video_idx], self.gd_summarized_video_frame_indices[video_idx]
 
-class Cnn0(nn.Module):
+def get_dataloaders(video_fps, skip_frames, train_ratio, annotation_fp, mat_file_path, h5_file_path):
+
+    ground_truths_trimmed = []
+    ground_truths_full = []
+    frames = []
+    audios = []
+    full_n_frames = []
+    gd_summarized_video_frame_indices = []
+    for video_fp in video_fps:
+        video_id = video_fp.split('/')[-1].split('.')[0]
+        audio_fp = ".".join(video_fp.split(".")[:-1]) + ".wav"
+        print("Extracting content from %s"%(video_id))
+        ground_truth_trimmed, ground_truth_full = get_annotations(annotation_fp = annotation_fp, video_id = video_id, skip_frames = skip_frames)
+        ground_truths_trimmed.append(ground_truth_trimmed)
+        ground_truths_full.append(ground_truth_full)
+        visual_frames_tensor, full_n_frames_ = extract_condensed_frame_tensor(video_fp, skip_frames = skip_frames)
+        N = len(visual_frames_tensor)
+        if not os.path.exists(audio_fp):
+            export_audio_from_video(audio_fp = audio_fp, video_fp = video_fp)
+        audio_features_tensor = extract_audio_features(audio_fp = audio_fp, n_frames = N)
+
+        gd = load_mat_file(mat_file_path, video_id)
+        gd_summarized_video_frame_indices_one_annotator = []
+        for annotator_gd in gd:
+
+            _, summarized_video_frame_indices = postprocess\
+            (
+                video_id = video_id,
+                h5_file_path = h5_file_path,
+                mat_file_path = mat_file_path,
+                batch_importances = torch.tensor(annotator_gd[:, None]),
+                skip_frames = skip_frames,
+                full_n_frames = full_n_frames_,
+                full_frames = None
+            )
+            gd_summarized_video_frame_indices_one_annotator.append(summarized_video_frame_indices)
+        gd_summarized_video_frame_indices.append(np.array(gd_summarized_video_frame_indices_one_annotator))
+
+        full_n_frames.append(full_n_frames_)
+        frames.append(visual_frames_tensor)
+        audios.append(audio_features_tensor)
+
+    video_idx_offset = int(train_ratio * len(video_fps))
+
+    train_video_fps = video_fps[:video_idx_offset]
+    train_frames = frames[:video_idx_offset]
+    train_full_n_frames = full_n_frames[:video_idx_offset]
+    train_audios = audios[:video_idx_offset]
+    train_ground_truths_trimmed = ground_truths_trimmed[:video_idx_offset]
+    train_gd_summarized_video_frame_indices = gd_summarized_video_frame_indices[:video_idx_offset]
+
+    val_video_fps = video_fps[video_idx_offset:]
+    val_frames = frames[video_idx_offset:]
+    val_full_n_frames = full_n_frames[video_idx_offset:]
+    val_audios = audios[video_idx_offset:]
+    val_ground_truths_trimmed = ground_truths_trimmed[video_idx_offset:]
+    val_gd_summarized_video_frame_indices = gd_summarized_video_frame_indices[video_idx_offset:]
+
+    train_dataset = dataloader(fps = train_video_fps, frames = train_frames, full_n_frames = train_full_n_frames, audios = train_audios, labels = train_ground_truths_trimmed, gd_summarized_video_frame_indices = train_gd_summarized_video_frame_indices)
+    val_dataset = dataloader(fps = val_video_fps, frames = val_frames, full_n_frames = val_full_n_frames, audios = val_audios, labels = val_ground_truths_trimmed, gd_summarized_video_frame_indices = val_gd_summarized_video_frame_indices)
+
+    return train_dataset, val_dataset
+
+class VisBl(nn.Module):
 
     def __init__(self):
-        super(Cnn0, self).__init__()
+
+        super(VisBl, self).__init__()
 
         self.conv1 = nn.LazyConv2d(out_channels = 32, kernel_size = 7, stride = 3, padding = 0)
         self.relu1 = nn.ReLU(inplace = True)
@@ -91,59 +156,79 @@ class Cnn0(nn.Module):
         self.conv4 = nn.LazyConv2d(out_channels = 256, kernel_size = 3, stride = 1, padding = 1)
         self.relu4 = nn.ReLU(inplace = True)
 
+        self.flatten = nn.Flatten()
+
         self.linear5 = nn.LazyLinear(out_features = 512)
         self.relu5 = nn.ReLU(inplace = True)
 
-    def features(self, input):
+    def forward(self, input):
 
         x = self.conv1(input)
         x = self.relu1(x)
         x = self.maxpool1(x)
 
-        x = self.conv2(x)
+        x = self.conv2(input)
         x = self.relu2(x)
         x = self.maxpool2(x)
 
-        x = self.conv3(x)
+        x = self.conv3(input)
         x = self.relu3(x)
         x = self.maxpool3(x)
 
-        x = self.conv4(x)
+        x = self.conv4(input)
         x = self.relu4(x)
 
-        x = torch.flatten(x, start_dim = 1)
+        x = self.flatten(x)
         
         x = self.linear5(x)
         x = self.relu5(x)
 
         return x
 
+class AudBl(nn.Module):
+
+    def __init__(self):
+
+        super(AudBl, self).__init__()
+
+        self.conv1 = nn.Conv1d(in_channels=30, out_channels=64, kernel_size=3, stride=2, padding=1)
+        self.relu1 = nn.ReLU()
+
+        self.conv2 = nn.LazyConv1d(out_channels=128, kernel_size=3, stride=2, padding=1)
+        self.relu2 = nn.ReLU()
+
+        self.flatten =  nn.Flatten()
+
+        self.linear3 = nn.LazyLinear(256)
+        self.relu3 = nn.ReLU()
+
     def forward(self, input):
-        x = self.features(input)
+
+        x = self.conv1(input)
+        x = self.relu1(x)
+
+        x = self.conv2(x)
+        x = self.relu2(x)
+
+        x = self.flatten(x)
+
+        x = self.linear3(x)
+        x = self.relu3(x)
+
         return x
 
-class audio_visual_model(nn.Module):
+class AVM(nn.Module):
 
     def __init__(self, audio_included):
 
-        super(audio_visual_model, self).__init__()
+        super(AVM, self).__init__()
 
         self.audio_included = audio_included
 
-        self.visual_model = Cnn0()
+        self.visbl = VisBl()
 
-        self.conv1 = nn.Conv1d(in_channels=1, out_channels=16, kernel_size=3, stride=1, padding=1)
-
-        # Audio Branch (Simple CNN for MFCC); the sliding window covers all the Mel coefficients, for some fixed time units totalling <kernel_size>, and slides across the time unit axis; therefore for a given sliding window, the output considers all Mel coefficients for these particular fixed time units and returns one value
-        self.audio_model = nn.Sequential(
-            nn.Conv1d(in_channels=30, out_channels=64, kernel_size=3, stride=2, padding=1),
-            nn.ReLU(),
-            nn.LazyConv1d(out_channels=128, kernel_size=3, stride=2, padding=1),
-            nn.ReLU(),
-            nn.Flatten(),
-            nn.LazyLinear(256),
-            nn.ReLU()
-        )
+        if self.audio_included:
+            self.audbl = AudBl()
 
         self.fusion = nn.Sequential(
             nn.LazyLinear(512),
@@ -155,11 +240,10 @@ class audio_visual_model(nn.Module):
 
     def forward(self, audio_input, visual_input):
 
-        with torch.no_grad():
-            visual_features = self.visual_model(visual_input)
+        visual_features = self.visbl(visual_input)
 
         if self.audio_included:
-            audio_features = self.audio_model(audio_input)
+            audio_features = self.audbl(audio_input)
             combined_features = torch.cat((audio_features, visual_features), axis = -1)
         else:
             combined_features = visual_features
@@ -217,17 +301,17 @@ def extract_audio_features(audio_fp: str, n_frames: int) -> np.array:
     y, sr = librosa.load(audio_fp)
     audio_samples_per_frame = len(y) / n_frames
     mfccs_per_frame = []
-    for frame in range(n_frames):
-        start_sample = round(frame * audio_samples_per_frame)
+    for frame_idx in range(n_frames):
+        start_sample = round(frame_idx * audio_samples_per_frame)
         end_sample = round(start_sample + audio_samples_per_frame)
-        
+
         # Ensure we don't go beyond the audio length
         if end_sample > len(y):
             end_sample = len(y)
 
-        mfccs_current_frame = librosa.feature.mfcc(y=y[start_sample:end_sample], sr=sr, n_mfcc=30)
         # Interpolation across the time axis for a given bin
-        
+        mfccs_current_frame = librosa.feature.mfcc(y=y[start_sample:end_sample], sr=sr, n_mfcc=30)
+
         mfccs_currect_frame_interpolated = []
         for f_idx in range(mfccs_current_frame.shape[0]):
             interpolator = interp1d(
@@ -455,17 +539,40 @@ def get_fscore(gd_summary_indices: np.ndarray, predicted_summary_indices: np.nda
     G = np.zeros(full_n_frames, dtype=int)
 
     f_scores = []
+    precisions = []
+    recalls = []
     for user in range(n_users):
         G = gd_summary_indices[user]
         overlapped = np.logical_and(S, G) # Only positive frames (i.e. frames included in video from both prediction and annotator)
         precision = sum(overlapped) / sum(S) if sum(S) != 0 else 0
         recall = sum(overlapped) / sum(G) if sum(G) != 0 else 0
-        f_score = precision * recall / (precision + recall) if (precision + recall) != 0 else 0
+        f_score = 2 * precision * recall / (precision + recall) if (precision + recall) != 0 else 0
         f_scores.append(f_score)
+        precisions.append(precision)
+        recalls.append(recall)
 
     return sum(f_scores) / len(f_scores), max(f_scores)
 
-def postprocessing(video_id, h5_file_path, mat_file_path, batch_importances, skip_frames, full_n_frames, full_frames = None):
+def postprocess_and_get_fscores(video_id, batch_predictions, full_n_batch_frames, gd_summarized_video_frame_indices, h5_file_path, mat_file_path, skip_frames):
+
+    # Clips and Knapsack optimization
+    _, summarized_video_frame_indices = postprocess\
+    (
+        video_id = video_id,
+        h5_file_path = h5_file_path,
+        mat_file_path = mat_file_path,
+        batch_importances = batch_predictions,
+        skip_frames = skip_frames,
+        full_n_frames = full_n_batch_frames,
+        full_frames = None
+    )
+
+    # Summarization evaluation
+    f_score_avg, f_score_max = get_fscore(gd_summary_indices = gd_summarized_video_frame_indices, predicted_summary_indices = summarized_video_frame_indices)
+
+    return f_score_avg, f_score_max
+
+def postprocess(video_id, h5_file_path, mat_file_path, batch_importances, skip_frames, full_n_frames, full_frames = None):
 
     if len(batch_importances.shape) != 1:
         assert len(batch_importances.shape) == 2 and batch_importances.shape[-1] == 1, 'E: Invalid shape for importance tensor'

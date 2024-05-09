@@ -4,10 +4,7 @@ from matplotlib.ticker import MaxNLocator
 
 def generate_metric_plots(opt_loss, est_train_losses, est_train_f_scores_avg, est_train_f_scores_max, val_losses, val_f_scores_avg, val_f_scores_max, exported_image_fp):
 
-    # baseline_loss = 0.3982
-
     n = len(est_train_losses)
-    assert n == len(est_train_losses) == len(est_train_f_scores_avg) == len(est_train_f_scores_max) == len(val_losses) == len(val_f_scores_avg) == len(val_f_scores_max), 'E: Inconsistent score list lengths'
 
     x = list(range(n))
 
