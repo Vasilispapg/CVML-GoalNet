@@ -39,15 +39,15 @@ def train_importance_model(audio_included, load_ckp):
     annotation_fp = 'ydata-tvsum50-v1_1/data/ydata-tvsum50-anno.tsv'
     h5_file_path = 'ydata-tvsum50-v1_1/ground_truth/eccv16_dataset_tvsum_google_pool5.h5'
     mat_file_path = 'ydata-tvsum50-v1_1/ground_truth/ydata-tvsum50.mat'
-    # video_fps = sorted(glob.glob('./ydata-tvsum50-v1_1/video/*.mp4'), reverse = False)
+    video_fps = sorted(glob.glob('./ydata-tvsum50-v1_1/video/*.mp4'), reverse = False)
     video_fps = ['./ydata-tvsum50-v1_1/video/37rzWOQsNIw.mp4', './ydata-tvsum50-v1_1/video/RBCABdttQmI.mp4']
 
     # Hyperparameters (preprocessing)
     skip_frames = 30
 
     # Hyperparameters (training process - frame importance model)
-    num_epochs = 25 # 100
-    lr = 0.00001
+    num_epochs = 150 # 100
+    lr = 0.0001
     train_ratio = 0.8
     np.random.seed(seed = 12344321)
 
@@ -177,9 +177,11 @@ def train_importance_model(audio_included, load_ckp):
             batch_loss = criterion(batch_predictions, batch_labels)
             batch_loss.backward()
             optimizer.step()
+            print(batch_predictions)
+            print(torch.var(frame_importance_model.fusion[0].weight.grad).item())
             full_n_batch_frames = train_dataset.full_n_frames_
 
-            # print(torch.sum(frame_importance_model.visbl.conv1.weight.grad).item())
+            print(torch.sum(frame_importance_model.visbl.conv1.weight.grad).item())
 
             batch_f_score_avg, batch_f_score_max = postprocess_and_get_fscores(video_id = video_id, batch_predictions = batch_predictions, full_n_batch_frames = full_n_batch_frames, gd_summarized_video_frame_indices = batch_gd_summarized_video_frame_indices_, h5_file_path = h5_file_path, mat_file_path = mat_file_path, skip_frames = skip_frames)
 
@@ -230,7 +232,7 @@ def train_importance_model(audio_included, load_ckp):
             print("Val ΔL " + color.GREEN + "↓ %.4f"%(abs(val_loss - prev_val_loss)) + color.END)
         else:
             print("Val ΔL " + color.RED + "↑ %.4f"%(abs(val_loss - prev_val_loss)) + color.END)
-        if val_loss < opt_val_loss:
+        if opt_est_train_f_score_avg < est_train_f_score_avg:
             opt_val_loss = val_loss
             opt_est_train_loss = est_train_loss
             opt_epoch = epoch

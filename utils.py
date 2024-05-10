@@ -109,6 +109,7 @@ def get_dataloaders(video_fps, skip_frames, train_ratio, annotation_fp, mat_file
                 full_frames = None
             )
             gd_summarized_video_frame_indices_per_annotator.append(summarized_video_frame_indices)
+            break
         gd_summarized_video_frame_indices.append(np.array(gd_summarized_video_frame_indices_per_annotator))
 
         full_n_frames.append(full_n_frames_)
@@ -142,20 +143,17 @@ class VisBl(nn.Module):
 
         super(VisBl, self).__init__()
 
-        self.conv1 = nn.LazyConv2d(out_channels = 32, kernel_size = 7, stride = 3, padding = 0)
+        self.conv1 = nn.LazyConv2d(out_channels = 32, kernel_size = 7, stride = 3, padding = 3)
         self.relu1 = nn.ReLU(inplace = True)
-        self.maxpool1 = nn.MaxPool2d(kernel_size = 3, stride = 2, padding = 0)
+        self.maxpool1 = nn.MaxPool2d(kernel_size = 3, stride = 1, padding = 0)
 
-        self.conv2 = nn.LazyConv2d(out_channels = 128, kernel_size = 3, stride = 1, padding = 2)
+        self.conv2 = nn.LazyConv2d(out_channels = 128, kernel_size = 3, stride = 1, padding = 1)
         self.relu2 = nn.ReLU(inplace = True)
-        self.maxpool2 = nn.MaxPool2d(kernel_size = 3, stride = 2, padding = 0)
+        self.maxpool2 = nn.MaxPool2d(kernel_size = 3, stride = 1, padding = 0)
 
-        self.conv3 = nn.LazyConv2d(out_channels = 256, kernel_size = 3, stride = 1, padding = 1)
+        self.conv3 = nn.LazyConv2d(out_channels = 256, kernel_size = 3, stride = 2, padding = 1)
         self.relu3 = nn.ReLU(inplace = True)
-        self.maxpool3 = nn.MaxPool2d(kernel_size = 3, stride = 2, padding = 0)
-
-        self.conv4 = nn.LazyConv2d(out_channels = 256, kernel_size = 3, stride = 1, padding = 1)
-        self.relu4 = nn.ReLU(inplace = True)
+        self.maxpool3 = nn.MaxPool2d(kernel_size = 3, stride = 1, padding = 0)
 
         self.flatten = nn.Flatten()
 
@@ -168,19 +166,16 @@ class VisBl(nn.Module):
         x = self.relu1(x)
         x = self.maxpool1(x)
 
-        x = self.conv2(input)
+        x = self.conv2(x)
         x = self.relu2(x)
         x = self.maxpool2(x)
 
-        x = self.conv3(input)
+        x = self.conv3(x)
         x = self.relu3(x)
         x = self.maxpool3(x)
 
-        x = self.conv4(input)
-        x = self.relu4(x)
-
         x = self.flatten(x)
-        
+
         x = self.linear5(x)
         x = self.relu5(x)
 
@@ -264,7 +259,7 @@ def extract_condensed_frame_tensor(fp: str, skip_frames: int):
         success, image = video.read()
         if count % skip_frames == 0 and success:
             image = ((image - image.min()) / (image.max() - image.min() + 1e-7)).astype(np.float32)
-            image = cv2.resize(image, (50, 50))
+            image = cv2.resize(image, (90, 90))
             frames.append(image)
         count += 1
     full_n_frames = count-1

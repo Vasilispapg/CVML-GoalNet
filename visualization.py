@@ -38,6 +38,7 @@ def generate_metric_plots(opt_loss, est_train_losses, est_train_f_scores_avg, es
 
     # plt.show()
     plt.savefig(exported_image_fp)
+    plt.clf()
 
 
 if __name__ == "__main__":
