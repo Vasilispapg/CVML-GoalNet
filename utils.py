@@ -109,7 +109,7 @@ def get_dataloaders(video_fps, skip_frames, train_ratio, annotation_fp, mat_file
                 full_frames = None
             )
             gd_summarized_video_frame_indices_per_annotator.append(summarized_video_frame_indices)
-            break
+
         gd_summarized_video_frame_indices.append(np.array(gd_summarized_video_frame_indices_per_annotator))
 
         full_n_frames.append(full_n_frames_)

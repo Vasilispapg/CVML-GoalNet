@@ -47,7 +47,8 @@ def train_importance_model(audio_included, load_ckp):
 
     # Hyperparameters (training process - frame importance model)
     num_epochs = 150 # 100
-    lr = 0.0001
+    subbatch_size = 10
+    lr = 0.001
     train_ratio = 0.8
     np.random.seed(seed = 12344321)
 
@@ -167,29 +168,51 @@ def train_importance_model(audio_included, load_ckp):
         print(color.BOLD + "Epoch %d/%d"%(epoch, num_epochs-1) + color.END + "\n")
         for video_idx, (video_id, batch_frames, batch_audios, batch_labels, batch_gd_summarized_video_frame_indices_) in enumerate(train_dataset):
 
-            t0_step = time()
+            batch_loss = 0
 
-            # Train step
-            optimizer.zero_grad()
-            batch_predictions = frame_importance_model(batch_audios, batch_frames)
-            # batch_loss = criterion(batch_predictions, (batch_labels-1).long())
-            # batch_predictions = torch.argmax(batch_predictions, axis = 1) + 1
-            batch_loss = criterion(batch_predictions, batch_labels)
-            batch_loss.backward()
-            optimizer.step()
-            print(batch_predictions)
-            print(torch.var(frame_importance_model.fusion[0].weight.grad).item())
+            subbatch_offset = - subbatch_size
+            subbatch_ceil = 0
+            iterations = 0
+            batch_predictions = []
+            while subbatch_ceil != len(batch_frames):
+                iterations += 1
+                subbatch_offset += subbatch_size
+                subbatch_ceil = min(subbatch_offset + subbatch_size, len(batch_frames))
+
+                subbatch_frames = batch_frames[subbatch_offset:subbatch_ceil]
+                subbatch_audios = batch_audios[subbatch_offset:subbatch_ceil]
+                subbatch_labels = batch_labels[subbatch_offset:subbatch_ceil]
+
+                # Train step
+                optimizer.zero_grad()
+                subbatch_predictions = frame_importance_model(subbatch_audios, subbatch_frames)
+                # subbatch_loss = criterion(subbatch_predictions, (subbatch_labels-1).long())
+                # subbatch_predictions = torch.argmax(subbatch_predictions, axis = 1) + 1
+                subbatch_loss = criterion(subbatch_predictions, subbatch_labels)
+                subbatch_loss.backward()
+                optimizer.step()
+
+                batch_loss += subbatch_loss.item()
+                batch_predictions += subbatch_predictions.flatten().tolist()
+                # print("Grad")
+                # print(torch.sum(frame_importance_model.visbl.conv1.weight.grad).item())
+                # print("Value")
+                # print(subbatch_predictions[0].item())
+                # print("GD")
+                # print(subbatch_labels[0].item())
+
+            batch_predictions = torch.tensor(batch_predictions)[:, None]
+
+            batch_loss = batch_loss / iterations
+
             full_n_batch_frames = train_dataset.full_n_frames_
-
-            print(torch.sum(frame_importance_model.visbl.conv1.weight.grad).item())
 
             batch_f_score_avg, batch_f_score_max = postprocess_and_get_fscores(video_id = video_id, batch_predictions = batch_predictions, full_n_batch_frames = full_n_batch_frames, gd_summarized_video_frame_indices = batch_gd_summarized_video_frame_indices_, h5_file_path = h5_file_path, mat_file_path = mat_file_path, skip_frames = skip_frames)
 
-            train_losses_step.append(batch_loss.item())
+            train_losses_step.append(batch_loss)
             train_f_scores_avg_step.append(batch_f_score_avg)
             train_f_scores_max_step.append(batch_f_score_max)
 
-            t1_step = time()
             # print("Video: %d/%d - ID: %s\nBatch Set - Size: %d - Loss: %.4f - F-score Avg: %.4f - F-score Max: %.4f\nVal Set - Loss: %.4f - F-score Avg: %.4f - F-score Max: %.4f\nΔt: %.1fs"%(video_idx, len(train_dataset)-1, video_id, full_n_batch_frames, batch_loss.item(), batch_f_score_avg, batch_f_score_max, val_loss, val_f_score_avg, val_f_score_max, t1_step-t0_step))
 
             torch.cuda.empty_cache()
