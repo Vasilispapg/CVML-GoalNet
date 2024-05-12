@@ -8,7 +8,7 @@ from time import time
 import torch.nn as nn
 import numpy as np
 
-from utils import extract_condensed_frame_tensor, export_audio_from_video, extract_audio_features, dataloader, AVM, export_video, get_frame_tensor, postprocess, get_dataloaders, postprocess_and_get_fscores
+from utils import extract_condensed_frame_tensor, export_audio_from_video, extract_audio_features, dataloader, AVM, export_video, get_frame_tensor, postprocess, get_dataloaders, postprocess_and_get_fscores, export_indices
 from visualization import generate_metric_plots
 
 class color:
@@ -39,7 +39,7 @@ def train_importance_model(audio_included, load_ckp):
     annotation_fp = 'ydata-tvsum50-v1_1/data/ydata-tvsum50-anno.tsv'
     h5_file_path = 'ydata-tvsum50-v1_1/ground_truth/eccv16_dataset_tvsum_google_pool5.h5'
     mat_file_path = 'ydata-tvsum50-v1_1/ground_truth/ydata-tvsum50.mat'
-    video_fps = sorted(glob.glob('./ydata-tvsum50-v1_1/video/*.mp4'), reverse = False)
+    # video_fps = sorted(glob.glob('./ydata-tvsum50-v1_1/video/*.mp4'), reverse = False)
     video_fps = ['./ydata-tvsum50-v1_1/video/37rzWOQsNIw.mp4', './ydata-tvsum50-v1_1/video/RBCABdttQmI.mp4']
 
     # Hyperparameters (preprocessing)
@@ -56,7 +56,7 @@ def train_importance_model(audio_included, load_ckp):
 
     # np.random.shuffle(video_fps)
 
-    train_dataset, val_dataset = get_dataloaders(video_fps = video_fps, skip_frames = skip_frames, train_ratio = train_ratio, annotation_fp = annotation_fp, mat_file_path = mat_file_path, h5_file_path = h5_file_path)
+    train_dataset, val_dataset = get_dataloaders(video_fps = video_fps, skip_frames = skip_frames, train_ratio = train_ratio, annotation_fp = annotation_fp, mat_file_path = mat_file_path, h5_file_path = h5_file_path, audio_included = audio_included)
 
     print("Number of train videos: %d"%(len(train_dataset)))
     print("Number of val videos: %d"%(len(val_dataset)))
@@ -194,14 +194,11 @@ def train_importance_model(audio_included, load_ckp):
 
                 batch_loss += subbatch_loss.item()
                 batch_predictions += subbatch_predictions.flatten().tolist()
-                # print("Grad")
-                # print(torch.sum(frame_importance_model.visbl.conv1.weight.grad).item())
-                # print("Value")
-                # print(subbatch_predictions[0].item())
-                # print("GD")
-                # print(subbatch_labels[0].item())
 
             batch_predictions = torch.tensor(batch_predictions)[:, None]
+
+            # print(torch.sum(torch.abs(batch_labels[:,None] - batch_predictions)))
+            # print("constant regressor baseline:", torch.sum(torch.abs(batch_labels[:,None] - 2)))
 
             batch_loss = batch_loss / iterations
 
@@ -264,6 +261,23 @@ def train_importance_model(audio_included, load_ckp):
             opt_val_f_score_avg = val_f_score_avg
             opt_val_f_score_max = val_f_score_max
             torch.save(obj = frame_importance_model.state_dict(), f = opt_frame_importance_model_fp)
+
+            _, summarized_video_frame_indices = postprocess\
+            (
+                video_id = video_id,
+                h5_file_path = h5_file_path,
+                mat_file_path = mat_file_path,
+                batch_importances = batch_predictions,
+                skip_frames = skip_frames,
+                full_n_frames = full_n_batch_frames,
+                full_frames = None
+            )
+
+            if audio_included:
+                indices_filename = 'indices.png'
+            else:
+                indices_filename = 'indices_no_audio.png'
+            export_indices(pred = summarized_video_frame_indices, gd = batch_gd_summarized_video_frame_indices_, fp = os.path.join('./tmp/', indices_filename))
 
         torch.save(obj = frame_importance_model.state_dict(), f = ckp_frame_importance_model_fp)
 

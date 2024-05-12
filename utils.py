@@ -1,6 +1,5 @@
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
 import cv2
 import csv
 from scipy.interpolate import interp1d
@@ -37,7 +36,10 @@ class dataloader(Dataset):
         self.video_ids = [video_fp.split('/')[-1].split('.')[0] for video_fp in self.fps]
         self.frames = [torch.tensor(frames_, dtype = torch.float32) for frames_ in frames]
         self.full_n_frames = full_n_frames
-        self.audios = [torch.tensor(audios_, dtype = torch.float32) for audios_ in audios]
+        if audios[0][0] is None:
+            self.audios = audios
+        else:
+            self.audios = [torch.tensor(audios_, dtype = torch.float32) for audios_ in audios]
         if labels is None:
             self.labels = self.gd_summarized_video_frame_indices = [None for _ in range(len(frames))]
             assert len(self.frames) == len(self.audios), 'E: Inconsistency in data loader definition'
@@ -73,7 +75,7 @@ class dataloader(Dataset):
 
         return self.video_ids[video_idx], self.frames[video_idx], self.audios[video_idx], self.labels[video_idx], self.gd_summarized_video_frame_indices[video_idx]
 
-def get_dataloaders(video_fps, skip_frames, train_ratio, annotation_fp, mat_file_path, h5_file_path):
+def get_dataloaders(video_fps, skip_frames, train_ratio, annotation_fp, mat_file_path, h5_file_path, audio_included):
 
     ground_truths_trimmed = []
     ground_truths_full = []
@@ -92,7 +94,10 @@ def get_dataloaders(video_fps, skip_frames, train_ratio, annotation_fp, mat_file
         N = len(visual_frames_tensor)
         if not os.path.exists(audio_fp):
             export_audio_from_video(audio_fp = audio_fp, video_fp = video_fp)
-        audio_features_tensor = extract_audio_features(audio_fp = audio_fp, n_frames = N)
+        if audio_included:
+            audio_features_tensor = extract_audio_features(audio_fp = audio_fp, n_frames = N, bin_length = skip_frames)
+        else:
+            audio_features_tensor = [None for _ in range(N)]
 
         gd = load_mat_file(mat_file_path, video_id)
         gd_summarized_video_frame_indices_per_annotator = []
@@ -143,41 +148,49 @@ class VisBl(nn.Module):
 
         super(VisBl, self).__init__()
 
-        self.conv1 = nn.LazyConv2d(out_channels = 32, kernel_size = 7, stride = 3, padding = 3)
+        self.conv1 = nn.LazyConv2d(out_channels = 64, kernel_size = 3, stride = 3, padding = 3)
         self.relu1 = nn.ReLU(inplace = True)
         self.maxpool1 = nn.MaxPool2d(kernel_size = 3, stride = 1, padding = 0)
+        self.bnorm1 = nn.LazyBatchNorm2d()
 
-        self.conv2 = nn.LazyConv2d(out_channels = 128, kernel_size = 3, stride = 1, padding = 1)
+        self.conv2 = nn.LazyConv2d(out_channels = 256, kernel_size = 3, stride = 1, padding = 1)
         self.relu2 = nn.ReLU(inplace = True)
         self.maxpool2 = nn.MaxPool2d(kernel_size = 3, stride = 1, padding = 0)
+        self.bnorm2 = nn.LazyBatchNorm2d()
 
-        self.conv3 = nn.LazyConv2d(out_channels = 256, kernel_size = 3, stride = 2, padding = 1)
+        self.conv3 = nn.LazyConv2d(out_channels = 512, kernel_size = 3, stride = 1, padding = 1)
         self.relu3 = nn.ReLU(inplace = True)
         self.maxpool3 = nn.MaxPool2d(kernel_size = 3, stride = 1, padding = 0)
+        self.bnorm3 = nn.LazyBatchNorm2d()
 
         self.flatten = nn.Flatten()
 
         self.linear5 = nn.LazyLinear(out_features = 512)
         self.relu5 = nn.ReLU(inplace = True)
+        self.drop5 = nn.Dropout(0.2)
 
     def forward(self, input):
 
         x = self.conv1(input)
         x = self.relu1(x)
         x = self.maxpool1(x)
+        x = self.bnorm1(x)
 
         x = self.conv2(x)
         x = self.relu2(x)
         x = self.maxpool2(x)
+        x = self.bnorm2(x)
 
         x = self.conv3(x)
         x = self.relu3(x)
         x = self.maxpool3(x)
+        x = self.bnorm3(x)
 
         x = self.flatten(x)
 
         x = self.linear5(x)
         x = self.relu5(x)
+        x = self.drop5(x)
 
         return x
 
@@ -195,7 +208,7 @@ class AudBl(nn.Module):
 
         self.flatten =  nn.Flatten()
 
-        self.linear3 = nn.LazyLinear(256)
+        self.linear3 = nn.LazyLinear(128)
         self.relu3 = nn.ReLU()
 
     def forward(self, input):
@@ -229,6 +242,16 @@ class AVM(nn.Module):
         self.fusion = nn.Sequential(
             nn.LazyLinear(512),
             nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.LazyLinear(512),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.LazyLinear(256),
+            nn.ReLU(),
+            nn.Dropout(0.2),
+            nn.LazyLinear(128),
+            nn.ReLU(),
+            nn.Dropout(0.2),
             nn.LazyLinear(1),
             nn.Sigmoid()
             # nn.Softmax(dim = 1),
@@ -259,7 +282,7 @@ def extract_condensed_frame_tensor(fp: str, skip_frames: int):
         success, image = video.read()
         if count % skip_frames == 0 and success:
             image = ((image - image.min()) / (image.max() - image.min() + 1e-7)).astype(np.float32)
-            image = cv2.resize(image, (90, 90))
+            image = cv2.resize(image, (40, 40))
             frames.append(image)
         count += 1
     full_n_frames = count-1
@@ -287,14 +310,15 @@ def export_audio_from_video(audio_fp, video_fp):
     audio.write_audiofile(audio_fp)
     video.close()
 
-def extract_audio_features(audio_fp: str, n_frames: int) -> np.array:
+def extract_audio_features(audio_fp: str, n_frames: int, bin_length: int) -> np.array:
     '''
         Returns:
-            mfccs_per_frame. Shape (N, n_mfcc, T), where N is the number of frames, F is the number of MFC coefficients and T is the frame's bin time length.
+            mfccs_per_frame. Shape (N, n_mfcc, B), where N is the number of frames, n_mfcc is the number of MFC coefficients and B is the frame's bin time length.
     '''
 
-    T = 26
+    B = bin_length
     y, sr = librosa.load(audio_fp)
+    breakpoint()
     audio_samples_per_frame = len(y) / n_frames
     mfccs_per_frame = []
     for frame_idx in range(n_frames):
@@ -314,11 +338,11 @@ def extract_audio_features(audio_fp: str, n_frames: int) -> np.array:
                 np.arange(mfccs_current_frame.shape[1]), 
                 mfccs_current_frame[f_idx, :], 
                 kind='cubic',
-                fill_value="extrapolate"  # This handles extrapolation
+                fill_value="extrapolate"
             )
-            mfccs_currect_frame_interpolated.append(interpolator(np.linspace(0, mfccs_current_frame.shape[1] - 1, T)))
+            mfccs_currect_frame_interpolated.append(interpolator(np.linspace(0, mfccs_current_frame.shape[1] - 1, B)))
         mfccs_currect_frame_interpolated = np.array(mfccs_currect_frame_interpolated)
-        assert mfccs_currect_frame_interpolated.shape[-1] == T, 'E: Shape mismatch'
+        assert mfccs_currect_frame_interpolated.shape[-1] == B, 'E: Shape mismatch'
         mfccs_per_frame.append(mfccs_currect_frame_interpolated)
     mfccs_per_frame = np.array(mfccs_per_frame)
 
@@ -367,7 +391,7 @@ def get_annotations(annotation_fp, video_id, skip_frames):
         count+=1
     mean_annotations_trimmed = np.array(mean_annotations_trimmed)
 
-    return mean_annotations_trimmed, mean_annotations_full
+    return np.round(mean_annotations_trimmed), np.round(mean_annotations_full)
 
 def expand_array(arr, expansion_rate, length):
 
@@ -555,6 +579,11 @@ def get_fscore(gd_summary_indices: np.ndarray, predicted_summary_indices: np.nda
 
     return sum(f_scores) / len(f_scores), max(f_scores)
 
+def export_indices(pred, gd, fp):
+    A = np.concatenate((gd, pred[None, :]), axis = 0)
+    plt.imshow(A, aspect = 150)
+    plt.savefig(fp)
+
 def postprocess_and_get_fscores(video_id, batch_predictions, full_n_batch_frames, gd_summarized_video_frame_indices, h5_file_path, mat_file_path, skip_frames):
 
     # Clips and Knapsack optimization
@@ -571,10 +600,6 @@ def postprocess_and_get_fscores(video_id, batch_predictions, full_n_batch_frames
 
     # Summarization evaluation
     f_score_avg, f_score_max = get_fscore(gd_summary_indices = gd_summarized_video_frame_indices, predicted_summary_indices = summarized_video_frame_indices)
-
-    A = np.concatenate((gd_summarized_video_frame_indices, summarized_video_frame_indices[None, :]), axis = 0)
-    plt.imshow(A, aspect = 150)
-    plt.savefig("./tmp/indices.png")
 
     return f_score_avg, f_score_max
 

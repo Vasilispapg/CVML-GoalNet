@@ -11,7 +11,7 @@ from utils import postprocess_and_get_fscores, get_dataloaders, AVM
 
 if __name__ == '__main__':
 
-    audio_included = True
+    audio_included = False
 
     # Paths
     if audio_included:
@@ -26,7 +26,7 @@ if __name__ == '__main__':
     h5_file_path = 'ydata-tvsum50-v1_1/ground_truth/eccv16_dataset_tvsum_google_pool5.h5'
     mat_file_path = 'ydata-tvsum50-v1_1/ground_truth/ydata-tvsum50.mat'
     video_fps = sorted(glob.glob('./ydata-tvsum50-v1_1/video/*.mp4'), reverse = False)
-    # video_fps = ['./ydata-tvsum50-v1_1/video/RBCABdttQmI.mp4', './ydata-tvsum50-v1_1/video/-esJrBWj2d8.mp4', './ydata-tvsum50-v1_1/video/37rzWOQsNIw.mp4']
+    video_fps = ['./ydata-tvsum50-v1_1/video/37rzWOQsNIw.mp4', './ydata-tvsum50-v1_1/video/RBCABdttQmI.mp4']
 
     # Hyperparameters (preprocessing)
     skip_frames = 30
@@ -41,7 +41,7 @@ if __name__ == '__main__':
 
     np.random.shuffle(video_fps)
 
-    train_dataset, val_dataset = get_dataloaders(video_fps = video_fps, skip_frames = skip_frames, train_ratio = train_ratio, annotation_fp = annotation_fp, mat_file_path = mat_file_path, h5_file_path = h5_file_path)
+    train_dataset, val_dataset = get_dataloaders(video_fps = video_fps, skip_frames = skip_frames, train_ratio = train_ratio, annotation_fp = annotation_fp, mat_file_path = mat_file_path, h5_file_path = h5_file_path, audio_included = audio_included)
 
     print("Number of train videos: %d"%(len(train_dataset)))
     print("Number of val videos: %d"%(len(val_dataset)))
